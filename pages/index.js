@@ -6,10 +6,18 @@ export default function Home() {
   const [stocks, setStocks] = useState([]);
   const [newSymbol, setNewSymbol] = useState("");
   const [loading, setLoading] = useState(true);
+  const [status, setStatus] = useState(null);
 
   const endpoint = useMemo(() => {
     return mode === "dashboard" ? "/api/prices" : "/api/screener";
   }, [mode]);
+
+  const loadStatus = () => {
+    fetch("/api/status")
+      .then((res) => res.json())
+      .then((data) => setStatus(data))
+      .catch(() => setStatus(null));
+  };
 
   const loadData = () => {
     setLoading(true);
@@ -29,12 +37,19 @@ export default function Home() {
       .catch(() => setStocks([]));
   };
 
+  const refreshAll = () => {
+    loadData();
+    loadStocks();
+    loadStatus();
+  };
+
   useEffect(() => {
     loadData();
   }, [endpoint]);
 
   useEffect(() => {
     loadStocks();
+    loadStatus();
   }, []);
 
   const addStock = async () => {
@@ -60,6 +75,7 @@ export default function Home() {
 
     loadStocks();
     loadData();
+    loadStatus();
   };
 
   return (
@@ -70,6 +86,16 @@ export default function Home() {
           <h1 style={styles.title}>📊 Stock Dashboard</h1>
           <div style={styles.subtitle}>
             Giá thật + RSI + MA20/50/100 + MACD + breakout + score chuyên gia
+          </div>
+
+          <div style={styles.statusBar}>
+            <div style={styles.statusText}>
+              Lần cập nhật gần nhất:{" "}
+              <b>{formatDateTime(status?.last_updated) || "Chưa có dữ liệu"}</b>
+            </div>
+            <button onClick={refreshAll} style={styles.refreshBtn}>
+              Refresh
+            </button>
           </div>
         </div>
 
@@ -221,6 +247,13 @@ function formatNum(value) {
   return Number(value).toFixed(2);
 }
 
+function formatDateTime(value) {
+  if (!value) return "";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleString("vi-VN");
+}
+
 const styles = {
   page: {
     minHeight: "100vh",
@@ -253,10 +286,35 @@ const styles = {
     fontSize: 14,
     lineHeight: 1.5,
   },
+  statusBar: {
+    marginTop: 12,
+    display: "flex",
+    gap: 10,
+    alignItems: "center",
+    justifyContent: "space-between",
+    flexWrap: "wrap",
+    background: "#fff",
+    padding: 12,
+    borderRadius: 12,
+    boxShadow: "0 10px 30px rgba(0,0,0,0.05)",
+  },
+  statusText: {
+    fontSize: 13,
+    color: "#374151",
+  },
+  refreshBtn: {
+    padding: "10px 14px",
+    borderRadius: 10,
+    border: "none",
+    background: "#111827",
+    color: "#fff",
+    fontWeight: 700,
+  },
   watchlistCard: {
     background: "#fff",
     borderRadius: 16,
     padding: 14,
+    marginTop: 16,
     marginBottom: 16,
     boxShadow: "0 10px 30px rgba(0,0,0,0.06)",
   },
