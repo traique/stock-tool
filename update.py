@@ -66,14 +66,14 @@ def detect_price_action(df):
     last = df.iloc[-1]
     prev = df.iloc[-2]
 
-    bullish_engulfing = (
+    bullish_engulfing = bool(
         prev["close"] < prev["open"]
         and last["close"] > last["open"]
         and last["open"] <= prev["close"]
         and last["close"] >= prev["open"]
     )
 
-    bearish_engulfing = (
+    bearish_engulfing = bool(
         prev["close"] > prev["open"]
         and last["close"] < last["open"]
         and last["open"] >= prev["close"]
@@ -117,7 +117,6 @@ def main():
                 print(f"{symbol}: không đủ dữ liệu để tính chỉ báo")
                 continue
 
-            # Lưu price_bars
             for _, row in df.tail(120).iterrows():
                 cur.execute(
                     """
@@ -145,7 +144,6 @@ def main():
                     )
                 )
 
-            # Tính chỉ báo
             df["ma20"] = df["close"].rolling(20).mean()
             df["ma50"] = df["close"].rolling(50).mean()
             df["ma100"] = df["close"].rolling(100).mean()
@@ -157,20 +155,19 @@ def main():
             bullish_ma = bool(
                 pd.notna(last["ma20"])
                 and pd.notna(last["ma50"])
-                and last["close"] > last["ma20"] > last["ma50"]
+                and float(last["close"]) > float(last["ma20"]) > float(last["ma50"])
             )
 
             bullish_macd = bool(
                 pd.notna(last["macd"])
                 and pd.notna(last["macd_signal"])
-                and last["macd"] > last["macd_signal"]
+                and float(last["macd"]) > float(last["macd_signal"])
             )
 
-            overbought = bool(pd.notna(last["rsi"]) and last["rsi"] >= 70)
-            oversold = bool(pd.notna(last["rsi"]) and last["rsi"] <= 30)
+            overbought = bool(pd.notna(last["rsi"]) and float(last["rsi"]) >= 70)
+            oversold = bool(pd.notna(last["rsi"]) and float(last["rsi"]) <= 30)
             price_action = str(detect_price_action(df.tail(5)))
 
-            # Lưu stock_signals
             cur.execute(
                 """
                 insert into stock_signals
@@ -204,10 +201,10 @@ def main():
                     float(last["macd_signal"]) if pd.notna(last["macd_signal"]) else None,
                     float(last["macd_hist"]) if pd.notna(last["macd_hist"]) else None,
                     price_action,
-                    bullish_ma,
-                    bullish_macd,
-                    overbought,
-                    oversold,
+                    bool(bullish_ma),
+                    bool(bullish_macd),
+                    bool(overbought),
+                    bool(oversold),
                 )
             )
 
