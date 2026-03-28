@@ -195,11 +195,29 @@ def fetch_history(symbol):
     return normalize_df(raw_df)
 
 
+def upsert_system_status(cur, latest_market_ts):
+    cur.execute(
+        """
+        insert into system_status (job_name, last_run_at, last_success_at, last_market_ts, updated_at)
+        values (%s, now(), now(), %s, now())
+        on conflict (job_name) do update set
+          last_run_at = excluded.last_run_at,
+          last_success_at = excluded.last_success_at,
+          last_market_ts = excluded.last_market_ts,
+          updated_at = now()
+        """,
+        ("price_update", latest_market_ts),
+    )
+
+
 def main():
     log("Bắt đầu update giá và tín hiệu")
 
     conn = psycopg2.connect(DB_URL)
     cur = conn.cursor()
+
+    success_count = 0
+    latest_market_ts = None
 
     try:
         cur.execute("select symbol from stocks order by symbol")
@@ -378,12 +396,22 @@ def main():
                     ),
                 )
 
+                market_ts = last["ts"].to_pydatetime()
+                if latest_market_ts is None or market_ts > latest_market_ts:
+                    latest_market_ts = market_ts
+
                 conn.commit()
+                success_count += 1
                 log(f"OK {symbol} | ghi stock_signals thành công")
 
             except Exception as e:
                 conn.rollback()
                 log(f"FAIL {symbol} | {e}")
+
+        if success_count > 0:
+            upsert_system_status(cur, latest_market_ts)
+            conn.commit()
+            log("Đã cập nhật system_status thành công")
 
     finally:
         cur.close()
