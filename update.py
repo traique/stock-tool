@@ -80,11 +80,59 @@ def detect_price_action(df):
         and last["close"] <= prev["open"]
     )
 
+    body = abs(float(last["close"]) - float(last["open"]))
+    candle_range = float(last["high"]) - float(last["low"]) if pd.notna(last["high"]) and pd.notna(last["low"]) else 0
+    lower_wick = min(float(last["open"]), float(last["close"])) - float(last["low"]) if pd.notna(last["low"]) else 0
+    upper_wick = float(last["high"]) - max(float(last["open"]), float(last["close"])) if pd.notna(last["high"]) else 0
+
+    bullish_pinbar = candle_range > 0 and lower_wick > body * 2 and upper_wick < body * 1.2
+    bearish_pinbar = candle_range > 0 and upper_wick > body * 2 and lower_wick < body * 1.2
+
     if bullish_engulfing:
         return "bullish_engulfing"
     if bearish_engulfing:
         return "bearish_engulfing"
+    if bullish_pinbar:
+        return "bullish_pinbar"
+    if bearish_pinbar:
+        return "bearish_pinbar"
     return "neutral"
+
+
+def build_expert_note(last):
+    notes = []
+
+    if last["close"] > last["ma20"] > last["ma50"] > last["ma100"]:
+        notes.append("Xu hướng tăng khỏe")
+    elif last["close"] > last["ma20"]:
+        notes.append("Giá nằm trên MA20")
+    else:
+        notes.append("Xu hướng chưa mạnh")
+
+    if pd.notna(last["rsi"]):
+        if 50 <= last["rsi"] <= 70:
+            notes.append("Động lượng tích cực")
+        elif last["rsi"] > 70:
+            notes.append("Đang quá mua")
+        elif last["rsi"] < 30:
+            notes.append("Đang quá bán")
+
+    if last["macd"] > last["macd_signal"]:
+        notes.append("MACD ủng hộ xu hướng tăng")
+
+    if bool(last["breakout_20"]):
+        notes.append("Breakout 20 phiên")
+
+    if bool(last["breakout_55"]):
+        notes.append("Breakout 55 phiên")
+
+    if pd.notna(last["volume_ratio"]) and last["volume_ratio"] >= 1.5:
+        notes.append("Khối lượng tăng mạnh")
+
+    if not notes:
+        return "Trạng thái trung tính"
+
+    return " · ".join(notes)
 
 
 def main():
@@ -113,11 +161,11 @@ def main():
             df = normalize_df(raw_df)
             print(f"{symbol} normalized rows:", len(df))
 
-            if len(df) < 35:
-                print(f"{symbol}: không đủ dữ liệu để tính chỉ báo")
+            if len(df) < 120:
+                print(f"{symbol}: không đủ dữ liệu để tính đầy đủ MA100")
                 continue
 
-            for _, row in df.tail(120).iterrows():
+            for _, row in df.tail(140).iterrows():
                 cur.execute(
                     """
                     insert into price_bars
@@ -149,6 +197,15 @@ def main():
             df["ma100"] = df["close"].rolling(100).mean()
             df["rsi"] = calc_rsi(df["close"], 14)
             df["macd"], df["macd_signal"], df["macd_hist"] = calc_macd(df["close"])
+            df["volume_ma20"] = df["volume"].rolling(20).mean()
+            df["volume_ratio"] = df["volume"] / df["volume_ma20"]
+
+            df["highest_20_prev"] = df["high"].rolling(20).max().shift(1)
+            df["highest_55_prev"] = df["high"].rolling(55).max().shift(1)
+
+            df["breakout_20"] = df["close"] > df["highest_20_prev"]
+            df["breakout_55"] = df["close"] > df["highest_55_prev"]
+            df["distance_ma20"] = ((df["close"] - df["ma20"]) / df["ma20"]) * 100
 
             last = df.iloc[-1]
 
@@ -166,14 +223,47 @@ def main():
 
             overbought = bool(pd.notna(last["rsi"]) and float(last["rsi"]) >= 70)
             oversold = bool(pd.notna(last["rsi"]) and float(last["rsi"]) <= 30)
+            breakout_20 = bool(last["breakout_20"]) if pd.notna(last["breakout_20"]) else False
+            breakout_55 = bool(last["breakout_55"]) if pd.notna(last["breakout_55"]) else False
+
             price_action = str(detect_price_action(df.tail(5)))
+
+            technical_score = 0
+            momentum_score = 0
+            breakout_score = 0
+
+            if bullish_ma:
+                technical_score += 25
+            if pd.notna(last["close"]) and pd.notna(last["ma100"]) and float(last["close"]) > float(last["ma100"]):
+                technical_score += 10
+            if pd.notna(last["distance_ma20"]) and 0 <= float(last["distance_ma20"]) <= 8:
+                technical_score += 10
+
+            if bullish_macd:
+                momentum_score += 15
+            if pd.notna(last["rsi"]) and 50 <= float(last["rsi"]) <= 70:
+                momentum_score += 15
+            if pd.notna(last["macd_hist"]) and float(last["macd_hist"]) > 0:
+                momentum_score += 10
+
+            if breakout_20:
+                breakout_score += 12
+            if breakout_55:
+                breakout_score += 18
+            if pd.notna(last["volume_ratio"]) and float(last["volume_ratio"]) >= 1.5:
+                breakout_score += 10
+
+            total_score = technical_score + momentum_score + breakout_score
+            expert_note = build_expert_note(last)
 
             cur.execute(
                 """
                 insert into stock_signals
                 (symbol, ts, close, rsi, ma20, ma50, ma100, macd, macd_signal, macd_hist,
-                 price_action, bullish_ma, bullish_macd, overbought, oversold)
-                values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                 price_action, bullish_ma, bullish_macd, overbought, oversold,
+                 volume_ma20, volume_ratio, breakout_20, breakout_55, distance_ma20,
+                 technical_score, momentum_score, breakout_score, total_score, expert_note)
+                values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 on conflict (symbol, ts) do update set
                   close = excluded.close,
                   rsi = excluded.rsi,
@@ -187,7 +277,17 @@ def main():
                   bullish_ma = excluded.bullish_ma,
                   bullish_macd = excluded.bullish_macd,
                   overbought = excluded.overbought,
-                  oversold = excluded.oversold
+                  oversold = excluded.oversold,
+                  volume_ma20 = excluded.volume_ma20,
+                  volume_ratio = excluded.volume_ratio,
+                  breakout_20 = excluded.breakout_20,
+                  breakout_55 = excluded.breakout_55,
+                  distance_ma20 = excluded.distance_ma20,
+                  technical_score = excluded.technical_score,
+                  momentum_score = excluded.momentum_score,
+                  breakout_score = excluded.breakout_score,
+                  total_score = excluded.total_score,
+                  expert_note = excluded.expert_note
                 """,
                 (
                     symbol,
@@ -205,6 +305,16 @@ def main():
                     bool(bullish_macd),
                     bool(overbought),
                     bool(oversold),
+                    float(last["volume_ma20"]) if pd.notna(last["volume_ma20"]) else None,
+                    float(last["volume_ratio"]) if pd.notna(last["volume_ratio"]) else None,
+                    bool(breakout_20),
+                    bool(breakout_55),
+                    float(last["distance_ma20"]) if pd.notna(last["distance_ma20"]) else None,
+                    float(technical_score),
+                    float(momentum_score),
+                    float(breakout_score),
+                    float(total_score),
+                    expert_note,
                 )
             )
 
