@@ -2,7 +2,7 @@ import { createClient } from "@supabase/supabase-js";
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+  process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
 export default async function handler(req, res) {
@@ -19,7 +19,7 @@ export default async function handler(req, res) {
       .maybeSingle();
 
     if (signalError) {
-      return res.status(500).json({ error: signalError.message });
+      return res.status(500).json({ error: signalError.message, where: "stock_signals" });
     }
 
     const { data: systemStatus, error: statusError } = await supabase
@@ -29,7 +29,7 @@ export default async function handler(req, res) {
       .maybeSingle();
 
     if (statusError) {
-      return res.status(500).json({ error: statusError.message });
+      return res.status(500).json({ error: statusError.message, where: "system_status" });
     }
 
     return res.status(200).json({
@@ -39,8 +39,12 @@ export default async function handler(req, res) {
       db_written_at: latestSignal?.created_at || null,
       github_update_at: systemStatus?.last_run_at || null,
       github_success_at: systemStatus?.last_success_at || null,
+      debug_has_system_status: !!systemStatus,
     });
   } catch (err) {
-    return res.status(500).json({ error: err.message || "Unknown server error" });
+    return res.status(500).json({
+      error: err.message || "Unknown server error",
+      where: "handler",
+    });
   }
 }
