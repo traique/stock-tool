@@ -54,6 +54,7 @@ export default async function handler(req, res) {
       github_update_at: systemStatus?.last_run_at || null,
       github_success_at: systemStatus?.last_success_at || null,
       debug_has_system_status: !!systemStatus,
+      debug_project_url: supabaseUrl,
     });
   } catch (err) {
     return res.status(500).json({
