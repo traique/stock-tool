@@ -81,9 +81,21 @@ def detect_price_action(df):
     )
 
     body = abs(float(last["close"]) - float(last["open"]))
-    candle_range = float(last["high"]) - float(last["low"]) if pd.notna(last["high"]) and pd.notna(last["low"]) else 0
-    lower_wick = min(float(last["open"]), float(last["close"])) - float(last["low"]) if pd.notna(last["low"]) else 0
-    upper_wick = float(last["high"]) - max(float(last["open"]), float(last["close"])) if pd.notna(last["high"]) else 0
+    candle_range = (
+        float(last["high"]) - float(last["low"])
+        if pd.notna(last["high"]) and pd.notna(last["low"])
+        else 0
+    )
+    lower_wick = (
+        min(float(last["open"]), float(last["close"])) - float(last["low"])
+        if pd.notna(last["low"])
+        else 0
+    )
+    upper_wick = (
+        float(last["high"]) - max(float(last["open"]), float(last["close"]))
+        if pd.notna(last["high"])
+        else 0
+    )
 
     bullish_pinbar = candle_range > 0 and lower_wick > body * 2 and upper_wick < body * 1.2
     bearish_pinbar = candle_range > 0 and upper_wick > body * 2 and lower_wick < body * 1.2
@@ -102,22 +114,37 @@ def detect_price_action(df):
 def build_expert_note(last):
     notes = []
 
-    if last["close"] > last["ma20"] > last["ma50"] > last["ma100"]:
+    ma20 = last["ma20"]
+    ma50 = last["ma50"]
+    ma100 = last["ma100"]
+    close = last["close"]
+    rsi = last["rsi"]
+    macd = last["macd"]
+    macd_signal = last["macd_signal"]
+    volume_ratio = last["volume_ratio"]
+
+    if (
+        pd.notna(close)
+        and pd.notna(ma20)
+        and pd.notna(ma50)
+        and pd.notna(ma100)
+        and close > ma20 > ma50 > ma100
+    ):
         notes.append("Xu hướng tăng khỏe")
-    elif last["close"] > last["ma20"]:
+    elif pd.notna(close) and pd.notna(ma20) and close > ma20:
         notes.append("Giá nằm trên MA20")
     else:
         notes.append("Xu hướng chưa mạnh")
 
-    if pd.notna(last["rsi"]):
-        if 50 <= last["rsi"] <= 70:
+    if pd.notna(rsi):
+        if 50 <= rsi <= 70:
             notes.append("Động lượng tích cực")
-        elif last["rsi"] > 70:
+        elif rsi > 70:
             notes.append("Đang quá mua")
-        elif last["rsi"] < 30:
+        elif rsi < 30:
             notes.append("Đang quá bán")
 
-    if last["macd"] > last["macd_signal"]:
+    if pd.notna(macd) and pd.notna(macd_signal) and macd > macd_signal:
         notes.append("MACD ủng hộ xu hướng tăng")
 
     if bool(last["breakout_20"]):
@@ -126,7 +153,7 @@ def build_expert_note(last):
     if bool(last["breakout_55"]):
         notes.append("Breakout 55 phiên")
 
-    if pd.notna(last["volume_ratio"]) and last["volume_ratio"] >= 1.5:
+    if pd.notna(volume_ratio) and volume_ratio >= 1.5:
         notes.append("Khối lượng tăng mạnh")
 
     if not notes:
@@ -172,7 +199,7 @@ def main():
             raw_df = quote.history(
                 start="2025-01-01",
                 end=datetime.now().strftime("%Y-%m-%d"),
-                interval="1D"
+                interval="1D",
             )
 
             print(f"{symbol} raw rows:", 0 if raw_df is None else len(raw_df))
@@ -210,7 +237,7 @@ def main():
                         float(row["close"]) if pd.notna(row["close"]) else None,
                         float(row["volume"]) if pd.notna(row["volume"]) else None,
                         "vnstock",
-                    )
+                    ),
                 )
 
             trim_old_price_bars(cur, symbol)
@@ -257,7 +284,11 @@ def main():
 
             if bullish_ma:
                 technical_score += 25
-            if pd.notna(last["close"]) and pd.notna(last["ma100"]) and float(last["close"]) > float(last["ma100"]):
+            if (
+                pd.notna(last["close"])
+                and pd.notna(last["ma100"])
+                and float(last["close"]) > float(last["ma100"])
+            ):
                 technical_score += 10
             if pd.notna(last["distance_ma20"]) and 0 <= float(last["distance_ma20"]) <= 8:
                 technical_score += 10
@@ -338,7 +369,7 @@ def main():
                     float(breakout_score),
                     float(total_score),
                     expert_note,
-                )
+                ),
             )
 
             conn.commit()
@@ -351,3 +382,7 @@ def main():
     cur.close()
     conn.close()
     print("=== END UPDATE ===")
+
+
+if __name__ == "__main__":
+    main()
