@@ -1,4 +1,4 @@
-name: Update Stock Data
+name: Update Price And Signals
 
 on:
   workflow_dispatch:
@@ -16,8 +16,10 @@ jobs:
         with:
           python-version: "3.11"
 
-      - run: pip install -r requirements.txt
+      - name: Install dependencies
+        run: pip install -r requirements.txt
 
-      - run: python update.py
+      - name: Run price update
+        run: python update.py
         env:
           DB_URL: ${{ secrets.DB_URL }}
