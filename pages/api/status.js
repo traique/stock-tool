@@ -1,5 +1,9 @@
-// pages/api/status.js
-import { getSupabaseServerClient } from "../../lib/supabaseServer";
+import { createClient } from "@supabase/supabase-js";
+
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+);
 
 export default async function handler(req, res) {
   if (req.method !== "GET") {
@@ -7,34 +11,34 @@ export default async function handler(req, res) {
   }
 
   try {
-    const supabase = getSupabaseServerClient();
-
-    const { data, error } = await supabase
+    const { data: latestSignal, error: signalError } = await supabase
       .from("stock_signals")
       .select("symbol, ts, created_at")
       .order("ts", { ascending: false })
-      .limit(1);
+      .limit(1)
+      .maybeSingle();
 
-    if (error) {
-      return res.status(500).json({ error: error.message });
+    if (signalError) {
+      return res.status(500).json({ error: signalError.message });
     }
 
-    if (!data || data.length === 0) {
-      return res.status(200).json({
-        last_updated: null,
-        latest_signal_ts: null,
-        latest_symbol: null,
-        db_written_at: null,
-      });
-    }
+    const { data: systemStatus, error: statusError } = await supabase
+      .from("system_status")
+      .select("job_name, last_run_at, last_success_at, last_market_ts, updated_at")
+      .eq("job_name", "price_update")
+      .maybeSingle();
 
-    const latest = data[0];
+    if (statusError) {
+      return res.status(500).json({ error: statusError.message });
+    }
 
     return res.status(200).json({
-      last_updated: latest.ts,
-      latest_signal_ts: latest.ts,
-      latest_symbol: latest.symbol,
-      db_written_at: latest.created_at ?? null,
+      last_updated: systemStatus?.last_market_ts || latestSignal?.ts || null,
+      latest_signal_ts: latestSignal?.ts || null,
+      latest_symbol: latestSignal?.symbol || null,
+      db_written_at: latestSignal?.created_at || null,
+      github_update_at: systemStatus?.last_run_at || null,
+      github_success_at: systemStatus?.last_success_at || null,
     });
   } catch (err) {
     return res.status(500).json({ error: err.message || "Unknown server error" });
