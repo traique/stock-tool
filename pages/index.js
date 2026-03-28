@@ -3,37 +3,104 @@ import { useEffect, useMemo, useState } from "react";
 export default function Home() {
   const [mode, setMode] = useState("dashboard");
   const [items, setItems] = useState([]);
+  const [stocks, setStocks] = useState([]);
+  const [newSymbol, setNewSymbol] = useState("");
   const [loading, setLoading] = useState(true);
 
   const endpoint = useMemo(() => {
     return mode === "dashboard" ? "/api/prices" : "/api/screener";
   }, [mode]);
 
-  useEffect(() => {
+  const loadData = () => {
     setLoading(true);
     fetch(endpoint)
       .then((res) => res.json())
       .then((data) => {
         setItems(Array.isArray(data) ? data : []);
       })
-      .catch(() => {
-        setItems([]);
-      })
-      .finally(() => {
-        setLoading(false);
-      });
+      .catch(() => setItems([]))
+      .finally(() => setLoading(false));
+  };
+
+  const loadStocks = () => {
+    fetch("/api/stocks")
+      .then((res) => res.json())
+      .then((data) => setStocks(Array.isArray(data) ? data : []))
+      .catch(() => setStocks([]));
+  };
+
+  useEffect(() => {
+    loadData();
   }, [endpoint]);
+
+  useEffect(() => {
+    loadStocks();
+  }, []);
+
+  const addStock = async () => {
+    const symbol = newSymbol.trim().toUpperCase();
+    if (!symbol) return;
+
+    await fetch("/api/stocks", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ symbol }),
+    });
+
+    setNewSymbol("");
+    loadStocks();
+  };
+
+  const removeStock = async (symbol) => {
+    await fetch("/api/stocks", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ symbol }),
+    });
+
+    loadStocks();
+    loadData();
+  };
 
   return (
     <div style={styles.page}>
       <div style={styles.container}>
         <div style={styles.headerWrap}>
-          <div>
-            <div style={styles.eyebrow}>Công cụ cá nhân</div>
-            <h1 style={styles.title}>📊 Stock Dashboard</h1>
-            <div style={styles.subtitle}>
-              Giá thật + RSI + MA20/50/100 + MACD + price action + lọc cổ phiếu
-            </div>
+          <div style={styles.eyebrow}>Công cụ cá nhân</div>
+          <h1 style={styles.title}>📊 Stock Dashboard</h1>
+          <div style={styles.subtitle}>
+            Giá thật + RSI + MA20/50/100 + MACD + breakout + score chuyên gia
+          </div>
+        </div>
+
+        <div style={styles.watchlistCard}>
+          <div style={styles.sectionTitle}>Quản lý watchlist</div>
+
+          <div style={styles.addRow}>
+            <input
+              value={newSymbol}
+              onChange={(e) => setNewSymbol(e.target.value.toUpperCase())}
+              placeholder="Nhập mã, ví dụ FPT"
+              style={styles.input}
+            />
+            <button onClick={addStock} style={styles.addBtn}>
+              Thêm
+            </button>
+          </div>
+
+          <div style={styles.stockTags}>
+            {stocks.map((s, idx) => (
+              <div key={idx} style={styles.stockTag}>
+                <span>{s.symbol}</span>
+                <button onClick={() => removeStock(s.symbol)} style={styles.removeBtn}>
+                  ×
+                </button>
+              </div>
+            ))}
+          </div>
+
+          <div style={styles.smallNote}>
+            Sau khi thêm/xóa mã, chạy lại workflow để cập nhật dữ liệu.
           </div>
         </div>
 
@@ -52,84 +119,99 @@ export default function Home() {
           </button>
         </div>
 
-        <div style={styles.card}>
-          <div style={styles.tableHeader}>
-            <div>Mã</div>
-            <div>Giá</div>
-            <div>RSI</div>
-            <div>MA</div>
-            <div>MACD</div>
-            <div>Action</div>
-          </div>
-
-          {loading ? (
-            <div style={styles.empty}>Đang tải...</div>
-          ) : items.length === 0 ? (
-            <div style={styles.empty}>Chưa có dữ liệu phù hợp</div>
-          ) : (
-            items.map((item, idx) => {
-              const f = item.fundamental || null;
-              const rsiColor =
-                item.rsi >= 70 ? "#dc2626" : item.rsi <= 30 ? "#16a34a" : "#111827";
-
-              return (
-                <div key={idx} style={styles.row}>
+        {loading ? (
+          <div style={styles.empty}>Đang tải...</div>
+        ) : items.length === 0 ? (
+          <div style={styles.empty}>Chưa có dữ liệu phù hợp</div>
+        ) : (
+          items.map((item, idx) => {
+            const f = item.fundamental || {};
+            return (
+              <div key={idx} style={styles.card}>
+                <div style={styles.cardTop}>
                   <div>
                     <div style={styles.symbol}>{item.symbol}</div>
-                    {f?.industry ? <div style={styles.meta}>{f.industry}</div> : null}
+                    {f.industry ? <div style={styles.meta}>{f.industry}</div> : null}
                   </div>
-
-                  <div>
-                    <div style={styles.value}>{formatNum(item.close)}</div>
-                    {f?.pe != null || f?.pb != null ? (
-                      <div style={styles.meta}>
-                        PE {formatNum(f?.pe)} · PB {formatNum(f?.pb)}
-                      </div>
-                    ) : null}
-                  </div>
-
-                  <div>
-                    <div style={{ ...styles.value, color: rsiColor }}>
-                      {formatNum(item.rsi)}
-                    </div>
-                    <div style={styles.meta}>
-                      {item.oversold ? "Quá bán" : item.overbought ? "Quá mua" : "Trung tính"}
-                    </div>
-                  </div>
-
-                  <div>
-                    <div style={styles.value}>
-                      20: {formatNum(item.ma20)}
-                    </div>
-                    <div style={styles.meta}>
-                      50: {formatNum(item.ma50)} · 100: {formatNum(item.ma100)}
-                    </div>
-                  </div>
-
-                  <div>
-                    <div style={styles.value}>
-                      {formatNum(item.macd)}
-                    </div>
-                    <div style={styles.meta}>
-                      Signal: {formatNum(item.macd_signal)}
-                    </div>
-                  </div>
-
-                  <div>
-                    <div style={styles.badges}>
-                      {item.bullish_ma ? <span style={styles.badgeGreen}>MA+</span> : null}
-                      {item.bullish_macd ? <span style={styles.badgeBlue}>MACD+</span> : null}
-                      {item.price_action && item.price_action !== "neutral" ? (
-                        <span style={styles.badgeGray}>{item.price_action}</span>
-                      ) : null}
-                    </div>
+                  <div style={styles.scoreBox}>
+                    <div style={styles.scoreLabel}>Score</div>
+                    <div style={styles.scoreValue}>{formatNum(item.total_score)}</div>
                   </div>
                 </div>
-              );
-            })
-          )}
-        </div>
+
+                <div style={styles.grid}>
+                  <Metric title="Giá" value={formatNum(item.close)} />
+                  <Metric
+                    title="RSI"
+                    value={formatNum(item.rsi)}
+                    sub={item.overbought ? "Quá mua" : item.oversold ? "Quá bán" : "Trung tính"}
+                    color={item.rsi >= 70 ? "#dc2626" : item.rsi <= 30 ? "#16a34a" : "#111827"}
+                  />
+                  <Metric
+                    title="MA"
+                    value={`20: ${formatNum(item.ma20)}`}
+                    sub={`50: ${formatNum(item.ma50)} · 100: ${formatNum(item.ma100)}`}
+                  />
+                  <Metric
+                    title="MACD"
+                    value={formatNum(item.macd)}
+                    sub={`Signal: ${formatNum(item.macd_signal)}`}
+                    color={item.macd > 0 ? "#16a34a" : "#dc2626"}
+                  />
+                  <Metric
+                    title="Volume"
+                    value={formatNum(item.volume_ratio)}
+                    sub={`MA20: ${formatNum(item.volume_ma20)}`}
+                  />
+                  <Metric
+                    title="Breakout"
+                    value={item.breakout_55 ? "55 phiên" : item.breakout_20 ? "20 phiên" : "-"}
+                    sub={`Cách MA20: ${formatNum(item.distance_ma20)}%`}
+                  />
+                </div>
+
+                <div style={styles.badges}>
+                  {item.bullish_ma ? <span style={styles.badgeGreen}>MA+</span> : null}
+                  {item.bullish_macd ? <span style={styles.badgeBlue}>MACD+</span> : null}
+                  {item.breakout_20 ? <span style={styles.badgeOrange}>BO20</span> : null}
+                  {item.breakout_55 ? <span style={styles.badgeRed}>BO55</span> : null}
+                  {item.price_action && item.price_action !== "neutral" ? (
+                    <span style={styles.badgeGray}>{item.price_action}</span>
+                  ) : null}
+                </div>
+
+                {item.expert_note ? (
+                  <div style={styles.noteBox}>
+                    <div style={styles.noteTitle}>Nhận định</div>
+                    <div style={styles.noteText}>{item.expert_note}</div>
+                  </div>
+                ) : null}
+
+                {(f.pe != null || f.pb != null || f.roe != null) ? (
+                  <div style={styles.fundBox}>
+                    <div style={styles.noteTitle}>Cơ bản</div>
+                    <div style={styles.fundRow}>
+                      <span>PE: {formatNum(f.pe)}</span>
+                      <span>PB: {formatNum(f.pb)}</span>
+                      <span>ROE: {formatNum(f.roe)}</span>
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+            );
+          })
+        )}
       </div>
+    </div>
+  );
+}
+
+function Metric({ title, value, sub, color }) {
+  return (
+    <div style={styles.metricCard}>
+      <div style={styles.metricTitle}>{title}</div>
+      <div style={{ ...styles.metricValue, color: color || "#111827" }}>{value}</div>
+      {sub ? <div style={styles.metricSub}>{sub}</div> : null}
     </div>
   );
 }
@@ -147,7 +229,7 @@ const styles = {
     fontFamily: "Arial, sans-serif",
   },
   container: {
-    maxWidth: 1100,
+    maxWidth: 960,
     margin: "0 auto",
   },
   headerWrap: {
@@ -162,7 +244,7 @@ const styles = {
   },
   title: {
     margin: 0,
-    fontSize: 32,
+    fontSize: 30,
     color: "#111827",
   },
   subtitle: {
@@ -170,6 +252,66 @@ const styles = {
     color: "#4b5563",
     fontSize: 14,
     lineHeight: 1.5,
+  },
+  watchlistCard: {
+    background: "#fff",
+    borderRadius: 16,
+    padding: 14,
+    marginBottom: 16,
+    boxShadow: "0 10px 30px rgba(0,0,0,0.06)",
+  },
+  sectionTitle: {
+    fontWeight: 700,
+    marginBottom: 10,
+    color: "#111827",
+  },
+  addRow: {
+    display: "flex",
+    gap: 8,
+    marginBottom: 10,
+  },
+  input: {
+    flex: 1,
+    padding: 12,
+    borderRadius: 10,
+    border: "1px solid #d1d5db",
+    fontSize: 14,
+  },
+  addBtn: {
+    padding: "12px 16px",
+    borderRadius: 10,
+    border: "none",
+    background: "#111827",
+    color: "#fff",
+    fontWeight: 700,
+  },
+  stockTags: {
+    display: "flex",
+    flexWrap: "wrap",
+    gap: 8,
+  },
+  stockTag: {
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+    background: "#eef2ff",
+    color: "#1e3a8a",
+    padding: "8px 12px",
+    borderRadius: 999,
+    fontWeight: 700,
+  },
+  removeBtn: {
+    border: "none",
+    background: "transparent",
+    color: "#dc2626",
+    fontSize: 18,
+    cursor: "pointer",
+    fontWeight: 700,
+  },
+  smallNote: {
+    marginTop: 10,
+    fontSize: 12,
+    color: "#6b7280",
   },
   tabs: {
     display: "flex",
@@ -196,75 +338,148 @@ const styles = {
   },
   card: {
     background: "#fff",
-    borderRadius: 16,
-    overflow: "hidden",
+    borderRadius: 18,
+    padding: 14,
+    marginBottom: 14,
     boxShadow: "0 10px 30px rgba(0,0,0,0.08)",
   },
-  tableHeader: {
-    display: "grid",
-    gridTemplateColumns: "1.2fr 1fr 0.8fr 1.2fr 1fr 1.2fr",
-    gap: 12,
-    padding: 14,
-    background: "#111827",
-    color: "#fff",
-    fontWeight: 700,
-    fontSize: 13,
-  },
-  row: {
-    display: "grid",
-    gridTemplateColumns: "1.2fr 1fr 0.8fr 1.2fr 1fr 1.2fr",
-    gap: 12,
-    padding: 14,
-    borderTop: "1px solid #e5e7eb",
-    alignItems: "center",
+  cardTop: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    marginBottom: 12,
   },
   symbol: {
-    fontSize: 18,
-    fontWeight: 700,
-    color: "#111827",
-  },
-  value: {
-    fontSize: 15,
-    fontWeight: 700,
+    fontSize: 20,
+    fontWeight: 800,
     color: "#111827",
   },
   meta: {
     marginTop: 4,
+    fontSize: 13,
+    color: "#6b7280",
+  },
+  scoreBox: {
+    textAlign: "right",
+  },
+  scoreLabel: {
     fontSize: 12,
     color: "#6b7280",
+  },
+  scoreValue: {
+    fontSize: 24,
+    fontWeight: 800,
+    color: "#111827",
+  },
+  grid: {
+    display: "grid",
+    gridTemplateColumns: "1fr 1fr",
+    gap: 10,
+  },
+  metricCard: {
+    background: "#f9fafb",
+    borderRadius: 12,
+    padding: 10,
+  },
+  metricTitle: {
+    fontSize: 12,
+    color: "#6b7280",
+    marginBottom: 6,
+  },
+  metricValue: {
+    fontSize: 24,
+    fontWeight: 800,
+    lineHeight: 1.1,
+  },
+  metricSub: {
+    marginTop: 4,
+    fontSize: 12,
+    color: "#6b7280",
+    lineHeight: 1.4,
   },
   badges: {
     display: "flex",
     flexWrap: "wrap",
-    gap: 6,
+    gap: 8,
+    marginTop: 12,
   },
   badgeGreen: {
     background: "#dcfce7",
     color: "#166534",
-    padding: "5px 8px",
+    padding: "6px 10px",
     borderRadius: 999,
-    fontSize: 12,
     fontWeight: 700,
+    fontSize: 12,
   },
   badgeBlue: {
     background: "#dbeafe",
     color: "#1d4ed8",
-    padding: "5px 8px",
+    padding: "6px 10px",
     borderRadius: 999,
-    fontSize: 12,
     fontWeight: 700,
+    fontSize: 12,
+  },
+  badgeOrange: {
+    background: "#ffedd5",
+    color: "#c2410c",
+    padding: "6px 10px",
+    borderRadius: 999,
+    fontWeight: 700,
+    fontSize: 12,
+  },
+  badgeRed: {
+    background: "#fee2e2",
+    color: "#b91c1c",
+    padding: "6px 10px",
+    borderRadius: 999,
+    fontWeight: 700,
+    fontSize: 12,
   },
   badgeGray: {
     background: "#f3f4f6",
     color: "#374151",
-    padding: "5px 8px",
+    padding: "6px 10px",
     borderRadius: 999,
+    fontWeight: 700,
+    fontSize: 12,
+  },
+  noteBox: {
+    marginTop: 12,
+    background: "#f8fafc",
+    borderRadius: 12,
+    padding: 10,
+  },
+  noteTitle: {
     fontSize: 12,
     fontWeight: 700,
+    color: "#475569",
+    marginBottom: 6,
+  },
+  noteText: {
+    fontSize: 13,
+    color: "#111827",
+    lineHeight: 1.5,
+  },
+  fundBox: {
+    marginTop: 12,
+    background: "#fafaf9",
+    borderRadius: 12,
+    padding: 10,
+  },
+  fundRow: {
+    display: "flex",
+    gap: 14,
+    flexWrap: "wrap",
+    fontSize: 13,
+    color: "#111827",
+    fontWeight: 600,
   },
   empty: {
+    background: "#fff",
+    borderRadius: 16,
     padding: 24,
     textAlign: "center",
     color: "#6b7280",
+    boxShadow: "0 10px 30px rgba(0,0,0,0.06)",
   },
 };
