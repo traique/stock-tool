@@ -1,8 +1,7 @@
-# update.py
 import os
 import math
 import traceback
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import pandas as pd
 import psycopg2
@@ -43,20 +42,20 @@ def calc_macd(series: pd.Series):
 
 def to_python_number(value):
     if value is None:
-      return None
+        return None
     if pd.isna(value):
-      return None
-    if isinstance(value, (float, int)):
-      if isinstance(value, float) and (math.isinf(value) or math.isnan(value)):
         return None
-      return float(value)
+    if isinstance(value, (int, float)):
+        if isinstance(value, float) and (math.isnan(value) or math.isinf(value)):
+            return None
+        return float(value)
     try:
-      num = float(value)
-      if math.isinf(num) or math.isnan(num):
-        return None
-      return num
+        num = float(value)
+        if math.isnan(num) or math.isinf(num):
+            return None
+        return num
     except Exception:
-      return None
+        return None
 
 
 def normalize_df(df: pd.DataFrame) -> pd.DataFrame:
@@ -93,8 +92,19 @@ def normalize_df(df: pd.DataFrame) -> pd.DataFrame:
 
 def fetch_history(symbol: str) -> pd.DataFrame:
     q = Quote(symbol=symbol, source="VCI")
-    # repo hiện đã dùng VCI cho dữ liệu giá
-    df = q.history(period="2y", interval="1D")
+
+    end_date = datetime.now()
+    start_date = end_date - timedelta(days=800)
+
+    try:
+        df = q.history(
+            start=start_date.strftime("%Y-%m-%d"),
+            end=end_date.strftime("%Y-%m-%d"),
+            interval="1D",
+        )
+    except Exception as e:
+        raise RuntimeError(f"Lỗi lấy lịch sử giá cho {symbol}: {e}")
+
     return normalize_df(df)
 
 
@@ -117,13 +127,14 @@ def build_feature_frame(df: pd.DataFrame) -> pd.DataFrame:
 
     work["highest_20_prev"] = work["high"].shift(1).rolling(20, min_periods=20).max()
     work["highest_55_prev"] = work["high"].shift(1).rolling(55, min_periods=55).max()
+
     work["breakout_20"] = work["close"] > work["highest_20_prev"]
     work["breakout_55"] = work["close"] > work["highest_55_prev"]
 
     work["bullish_ma"] = (
-        (work["close"] > work["ma20"]) &
-        (work["ma20"] > work["ma50"]) &
-        (work["ma50"] > work["ma100"])
+        (work["close"] > work["ma20"])
+        & (work["ma20"] > work["ma50"])
+        & (work["ma50"] > work["ma100"])
     )
 
     work["bullish_macd"] = (work["macd"] > work["macd_signal"]) & (work["macd"] > 0)
@@ -232,15 +243,20 @@ def get_symbols(conn) -> list[str]:
 def upsert_price_bars(conn, symbol: str, df: pd.DataFrame) -> None:
     records = []
     for _, row in df.iterrows():
-        records.append((
-            symbol,
-            row["ts"].to_pydatetime(),
-            to_python_number(row["open"]),
-            to_python_number(row["high"]),
-            to_python_number(row["low"]),
-            to_python_number(row["close"]),
-            to_python_number(row["volume"]),
-        ))
+        records.append(
+            (
+                symbol,
+                row["ts"].to_pydatetime(),
+                to_python_number(row["open"]),
+                to_python_number(row["high"]),
+                to_python_number(row["low"]),
+                to_python_number(row["close"]),
+                to_python_number(row["volume"]),
+            )
+        )
+
+    if not records:
+        return
 
     sql = """
     INSERT INTO price_bars (symbol, ts, open, high, low, close, volume)
@@ -366,19 +382,21 @@ def process_symbol(conn, symbol: str) -> dict:
         trim_old_price_bars(conn, symbol)
         upsert_latest_signal(conn, symbol, latest)
 
+        _, _, _, total_score, _ = score_latest_row(latest)
+
         return {
             "symbol": symbol,
             "ok": True,
             "ts": str(latest["ts"]),
             "close": to_python_number(latest.get("close")),
-            "score": score_latest_row(latest)[3],
+            "score": total_score,
         }
     except Exception as exc:
         return {
             "symbol": symbol,
             "ok": False,
             "reason": str(exc),
-            "trace": traceback.format_exc(limit=3),
+            "trace": traceback.format_exc(limit=5),
         }
 
 
