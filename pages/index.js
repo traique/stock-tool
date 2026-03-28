@@ -14,35 +14,43 @@ export default function Home() {
     return null;
   }, [mode]);
 
-  const loadStatus = () => {
-    fetch("/api/status")
-      .then((res) => res.json())
-      .then((data) => setStatus(data))
-      .catch(() => setStatus(null));
+  const loadStatus = async () => {
+    try {
+      const res = await fetch("/api/status");
+      const data = await res.json();
+      setStatus(data || null);
+    } catch {
+      setStatus(null);
+    }
   };
 
-  const loadData = () => {
+  const loadData = async () => {
     if (!endpoint) {
       setItems([]);
       setLoading(false);
       return;
     }
 
-    setLoading(true);
-    fetch(endpoint)
-      .then((res) => res.json())
-      .then((data) => {
-        setItems(Array.isArray(data) ? data : []);
-      })
-      .catch(() => setItems([]))
-      .finally(() => setLoading(false));
+    try {
+      setLoading(true);
+      const res = await fetch(endpoint);
+      const data = await res.json();
+      setItems(Array.isArray(data) ? data : []);
+    } catch {
+      setItems([]);
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const loadStocks = () => {
-    fetch("/api/stocks")
-      .then((res) => res.json())
-      .then((data) => setStocks(Array.isArray(data) ? data : []))
-      .catch(() => setStocks([]));
+  const loadStocks = async () => {
+    try {
+      const res = await fetch("/api/stocks");
+      const data = await res.json();
+      setStocks(Array.isArray(data) ? data : []);
+    } catch {
+      setStocks([]);
+    }
   };
 
   useEffect(() => {
@@ -58,28 +66,32 @@ export default function Home() {
     const symbol = newSymbol.trim().toUpperCase();
     if (!symbol) return;
 
-    await fetch("/api/stocks", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ symbol }),
-    });
-
-    setNewSymbol("");
-    loadStocks();
+    try {
+      await fetch("/api/stocks", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ symbol }),
+      });
+      setNewSymbol("");
+      await loadStocks();
+    } catch {}
   };
 
   const removeStock = async (symbol) => {
-    await fetch("/api/stocks", {
-      method: "DELETE",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ symbol }),
-    });
+    try {
+      await fetch("/api/stocks", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ symbol }),
+      });
 
-    loadStocks();
-    if (mode !== "watchlist") {
-      loadData();
-      loadStatus();
-    }
+      await loadStocks();
+
+      if (mode !== "watchlist") {
+        await loadData();
+        await loadStatus();
+      }
+    } catch {}
   };
 
   return (
@@ -87,7 +99,7 @@ export default function Home() {
       <div style={styles.container}>
         <div style={styles.headerWrap}>
           <div style={styles.topRow}>
-            <div>
+            <div style={styles.titleWrap}>
               <div style={styles.eyebrow}>Công cụ cá nhân</div>
               <h1 style={styles.title}>📊 Stock Dashboard</h1>
               <div style={styles.subtitle}>
@@ -95,10 +107,21 @@ export default function Home() {
               </div>
             </div>
 
-            <div style={styles.updatedBox}>
-              <div style={styles.updatedLabel}>Cập nhật gần nhất</div>
-              <div style={styles.updatedValue}>
-                {formatDateTime(status?.last_updated) || "Chưa có dữ liệu"}
+            <div style={styles.updatedPanel}>
+              <div style={styles.updatedSection}>
+                <div style={styles.updatedLabel}>Dữ liệu thị trường mới nhất</div>
+                <div style={styles.updatedValue}>
+                  {formatDateTime(status?.last_updated) || "Chưa có dữ liệu"}
+                </div>
+              </div>
+
+              <div style={styles.updatedDivider} />
+
+              <div style={styles.updatedSection}>
+                <div style={styles.updatedLabel}>GitHub update chạy lúc</div>
+                <div style={styles.updatedValue}>
+                  {formatDateTime(status?.github_update_at) || "Chưa có dữ liệu"}
+                </div>
               </div>
             </div>
           </div>
@@ -143,7 +166,7 @@ export default function Home() {
 
             <div style={styles.stockTags}>
               {stocks.map((s, idx) => (
-                <div key={idx} style={styles.stockTag}>
+                <div key={`${s.symbol}-${idx}`} style={styles.stockTag}>
                   <span>{s.symbol}</span>
                   <button onClick={() => removeStock(s.symbol)} style={styles.removeBtn}>
                     ×
@@ -163,13 +186,15 @@ export default function Home() {
         ) : (
           items.map((item, idx) => {
             const f = item.fundamental || {};
+
             return (
-              <div key={idx} style={styles.card}>
+              <div key={`${item.symbol}-${idx}`} style={styles.card}>
                 <div style={styles.cardTop}>
                   <div>
                     <div style={styles.symbol}>{item.symbol}</div>
                     {f.industry ? <div style={styles.meta}>{f.industry}</div> : null}
                   </div>
+
                   <div style={styles.scoreBox}>
                     <div style={styles.scoreLabel}>Score</div>
                     <div style={styles.scoreValue}>{formatNum(item.total_score)}</div>
@@ -178,28 +203,45 @@ export default function Home() {
 
                 <div style={styles.grid}>
                   <Metric title="Giá" value={formatNum(item.close)} />
+
                   <Metric
                     title="RSI"
                     value={formatNum(item.rsi)}
-                    sub={item.overbought ? "Quá mua" : item.oversold ? "Quá bán" : "Trung tính"}
-                    color={item.rsi >= 70 ? "#dc2626" : item.rsi <= 30 ? "#16a34a" : "#111827"}
+                    sub={
+                      item.overbought
+                        ? "Quá mua"
+                        : item.oversold
+                        ? "Quá bán"
+                        : "Trung tính"
+                    }
+                    color={
+                      item.rsi >= 70
+                        ? "#dc2626"
+                        : item.rsi <= 30
+                        ? "#16a34a"
+                        : "#111827"
+                    }
                   />
+
                   <Metric
                     title="MA"
                     value={`20: ${formatNum(item.ma20)}`}
                     sub={`50: ${formatNum(item.ma50)} · 100: ${formatNum(item.ma100)}`}
                   />
+
                   <Metric
                     title="MACD"
                     value={formatNum(item.macd)}
                     sub={`Signal: ${formatNum(item.macd_signal)}`}
                     color={item.macd > 0 ? "#16a34a" : "#dc2626"}
                   />
+
                   <Metric
                     title="Volume"
                     value={formatNum(item.volume_ratio)}
                     sub={`MA20: ${formatNum(item.volume_ma20)}`}
                   />
+
                   <Metric
                     title="Breakout"
                     value={item.breakout_55 ? "55 phiên" : item.breakout_20 ? "20 phiên" : "-"}
@@ -224,7 +266,7 @@ export default function Home() {
                   </div>
                 ) : null}
 
-                {(f.pe != null || f.pb != null || f.roe != null) ? (
+                {f.pe != null || f.pb != null || f.roe != null ? (
                   <div style={styles.fundBox}>
                     <div style={styles.noteTitle}>Cơ bản</div>
                     <div style={styles.fundRow}>
@@ -263,10 +305,18 @@ function formatDateTime(value) {
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return "";
 
-  return d.toLocaleString("vi-VN", {
-    timeZone: "Asia/Ho_Chi_Minh",
-    hour12: false,
-  }) + " GMT+7";
+  return (
+    d.toLocaleString("vi-VN", {
+      timeZone: "Asia/Ho_Chi_Minh",
+      hour12: false,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+    }) + " GMT+7"
+  );
 }
 
 const styles = {
@@ -290,22 +340,39 @@ const styles = {
     gap: 12,
     flexWrap: "wrap",
   },
-  updatedBox: {
+  titleWrap: {
+    flex: 1,
+    minWidth: 260,
+  },
+  updatedPanel: {
     background: "#fff",
-    padding: 12,
-    borderRadius: 12,
-    minWidth: 220,
+    padding: 14,
+    borderRadius: 14,
+    minWidth: 280,
     boxShadow: "0 10px 30px rgba(0,0,0,0.05)",
+    display: "flex",
+    flexDirection: "column",
+    gap: 10,
+  },
+  updatedSection: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 4,
+  },
+  updatedDivider: {
+    height: 1,
+    background: "#e5e7eb",
+    width: "100%",
   },
   updatedLabel: {
     fontSize: 12,
     color: "#6b7280",
-    marginBottom: 4,
   },
   updatedValue: {
     fontSize: 14,
     fontWeight: 700,
     color: "#111827",
+    lineHeight: 1.4,
   },
   eyebrow: {
     fontSize: 12,
@@ -380,6 +447,7 @@ const styles = {
     background: "#111827",
     color: "#fff",
     fontWeight: 700,
+    cursor: "pointer",
   },
   stockTags: {
     display: "flex",
@@ -422,6 +490,7 @@ const styles = {
     justifyContent: "space-between",
     alignItems: "flex-start",
     marginBottom: 12,
+    gap: 12,
   },
   symbol: {
     fontSize: 20,
