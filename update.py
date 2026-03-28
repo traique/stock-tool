@@ -135,6 +135,25 @@ def build_expert_note(last):
     return " · ".join(notes)
 
 
+def trim_old_price_bars(cur, symbol):
+    cur.execute(
+        """
+        delete from price_bars
+        where symbol = %s
+          and id not in (
+            select id from (
+              select id
+              from price_bars
+              where symbol = %s
+              order by ts desc
+              limit 140
+            ) keep_rows
+          )
+        """,
+        (symbol, symbol),
+    )
+
+
 def main():
     print("=== START UPDATE ===")
 
@@ -165,7 +184,9 @@ def main():
                 print(f"{symbol}: không đủ dữ liệu để tính đầy đủ MA100")
                 continue
 
-            for _, row in df.tail(140).iterrows():
+            recent_df = df.tail(140)
+
+            for _, row in recent_df.iterrows():
                 cur.execute(
                     """
                     insert into price_bars
@@ -191,6 +212,8 @@ def main():
                         "vnstock",
                     )
                 )
+
+            trim_old_price_bars(cur, symbol)
 
             df["ma20"] = df["close"].rolling(20).mean()
             df["ma50"] = df["close"].rolling(50).mean()
@@ -328,7 +351,3 @@ def main():
     cur.close()
     conn.close()
     print("=== END UPDATE ===")
-
-
-if __name__ == "__main__":
-    main()
