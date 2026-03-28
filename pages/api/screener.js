@@ -44,15 +44,18 @@ export default async function handler(req, res) {
       fundamental: fundamentalsMap[s.symbol] || null,
     }));
 
-    const filtered = merged.filter((x) => {
-      const f = x.fundamental || {};
-      const rsiOk = x.rsi == null || (x.rsi >= 45 && x.rsi <= 70);
-      const peOk = f.pe == null || f.pe < 20;
-      const pbOk = f.pb == null || f.pb < 3;
-      const roeOk = f.roe == null || f.roe > 12;
+    const filtered = merged
+      .filter((x) => {
+        const f = x.fundamental || {};
+        const rsiOk = x.rsi == null || (x.rsi >= 50 && x.rsi <= 70);
+        const peOk = f.pe == null || f.pe < 20;
+        const pbOk = f.pb == null || f.pb < 3.5;
+        const roeOk = f.roe == null || f.roe > 12;
+        const scoreOk = x.total_score != null && x.total_score >= 55;
 
-      return x.bullish_ma === true && x.bullish_macd === true && rsiOk && peOk && pbOk && roeOk;
-    });
+        return scoreOk && rsiOk && peOk && pbOk && roeOk;
+      })
+      .sort((a, b) => (b.total_score || 0) - (a.total_score || 0));
 
     res.status(200).json(filtered);
   } catch (err) {
