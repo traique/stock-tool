@@ -1,5 +1,6 @@
 import os
 from datetime import datetime
+
 import pandas as pd
 import psycopg2
 from vnstock import Quote
@@ -49,6 +50,7 @@ def normalize_df(df):
             raise Exception(f"Thiếu cột {col}. Các cột hiện có: {list(work.columns)}")
 
     work["ts"] = pd.to_datetime(work["ts"])
+
     for col in ["open", "high", "low", "close", "volume"]:
         work[col] = pd.to_numeric(work[col], errors="coerce")
 
@@ -115,7 +117,7 @@ def main():
                 print(f"{symbol}: không đủ dữ liệu để tính chỉ báo")
                 continue
 
-            # lưu price_bars
+            # Lưu price_bars
             for _, row in df.tail(120).iterrows():
                 cur.execute(
                     """
@@ -143,6 +145,7 @@ def main():
                     )
                 )
 
+            # Tính chỉ báo
             df["ma20"] = df["close"].rolling(20).mean()
             df["ma50"] = df["close"].rolling(50).mean()
             df["ma100"] = df["close"].rolling(100).mean()
@@ -151,22 +154,23 @@ def main():
 
             last = df.iloc[-1]
 
-            bullish_ma = (
+            bullish_ma = bool(
                 pd.notna(last["ma20"])
                 and pd.notna(last["ma50"])
                 and last["close"] > last["ma20"] > last["ma50"]
             )
 
-            bullish_macd = (
+            bullish_macd = bool(
                 pd.notna(last["macd"])
                 and pd.notna(last["macd_signal"])
                 and last["macd"] > last["macd_signal"]
             )
 
-            overbought = pd.notna(last["rsi"]) and last["rsi"] >= 70
-            oversold = pd.notna(last["rsi"]) and last["rsi"] <= 30
-            price_action = detect_price_action(df.tail(5))
+            overbought = bool(pd.notna(last["rsi"]) and last["rsi"] >= 70)
+            oversold = bool(pd.notna(last["rsi"]) and last["rsi"] <= 30)
+            price_action = str(detect_price_action(df.tail(5)))
 
+            # Lưu stock_signals
             cur.execute(
                 """
                 insert into stock_signals
