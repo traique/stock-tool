@@ -9,7 +9,9 @@ export default function Home() {
   const [status, setStatus] = useState(null);
 
   const endpoint = useMemo(() => {
-    return mode === "dashboard" ? "/api/prices" : "/api/screener";
+    if (mode === "dashboard") return "/api/prices";
+    if (mode === "screener") return "/api/screener";
+    return null;
   }, [mode]);
 
   const loadStatus = () => {
@@ -20,6 +22,12 @@ export default function Home() {
   };
 
   const loadData = () => {
+    if (!endpoint) {
+      setItems([]);
+      setLoading(false);
+      return;
+    }
+
     setLoading(true);
     fetch(endpoint)
       .then((res) => res.json())
@@ -68,8 +76,10 @@ export default function Home() {
     });
 
     loadStocks();
-    loadData();
-    loadStatus();
+    if (mode !== "watchlist") {
+      loadData();
+      loadStatus();
+    }
   };
 
   return (
@@ -94,37 +104,6 @@ export default function Home() {
           </div>
         </div>
 
-        <div style={styles.watchlistCard}>
-          <div style={styles.sectionTitle}>Quản lý watchlist</div>
-
-          <div style={styles.addRow}>
-            <input
-              value={newSymbol}
-              onChange={(e) => setNewSymbol(e.target.value.toUpperCase())}
-              placeholder="Nhập mã, ví dụ FPT"
-              style={styles.input}
-            />
-            <button onClick={addStock} style={styles.addBtn}>
-              Thêm
-            </button>
-          </div>
-
-          <div style={styles.stockTags}>
-            {stocks.map((s, idx) => (
-              <div key={idx} style={styles.stockTag}>
-                <span>{s.symbol}</span>
-                <button onClick={() => removeStock(s.symbol)} style={styles.removeBtn}>
-                  ×
-                </button>
-              </div>
-            ))}
-          </div>
-
-          <div style={styles.smallNote}>
-            Thêm hoặc xóa mã ở đây. Sau đó chạy lại workflow để cập nhật dữ liệu mới.
-          </div>
-        </div>
-
         <div style={styles.tabs}>
           <button
             onClick={() => setMode("dashboard")}
@@ -138,9 +117,46 @@ export default function Home() {
           >
             Screener
           </button>
+          <button
+            onClick={() => setMode("watchlist")}
+            style={mode === "watchlist" ? styles.tabActive : styles.tab}
+          >
+            Watchlist
+          </button>
         </div>
 
-        {loading ? (
+        {mode === "watchlist" ? (
+          <div style={styles.watchlistCard}>
+            <div style={styles.sectionTitle}>Quản lý watchlist</div>
+
+            <div style={styles.addRow}>
+              <input
+                value={newSymbol}
+                onChange={(e) => setNewSymbol(e.target.value.toUpperCase())}
+                placeholder="Nhập mã, ví dụ FPT"
+                style={styles.input}
+              />
+              <button onClick={addStock} style={styles.addBtn}>
+                Thêm
+              </button>
+            </div>
+
+            <div style={styles.stockTags}>
+              {stocks.map((s, idx) => (
+                <div key={idx} style={styles.stockTag}>
+                  <span>{s.symbol}</span>
+                  <button onClick={() => removeStock(s.symbol)} style={styles.removeBtn}>
+                    ×
+                  </button>
+                </div>
+              ))}
+            </div>
+
+            <div style={styles.smallNote}>
+              Sau khi thêm hoặc xóa mã, chạy lại workflow để cập nhật dữ liệu.
+            </div>
+          </div>
+        ) : loading ? (
           <div style={styles.empty}>Đang tải...</div>
         ) : items.length === 0 ? (
           <div style={styles.empty}>Chưa có dữ liệu phù hợp</div>
@@ -309,11 +325,34 @@ const styles = {
     fontSize: 14,
     lineHeight: 1.5,
   },
+  tabs: {
+    display: "flex",
+    gap: 8,
+    marginBottom: 16,
+    flexWrap: "wrap",
+  },
+  tab: {
+    border: "1px solid #d1d5db",
+    background: "#fff",
+    color: "#111827",
+    padding: "10px 14px",
+    borderRadius: 10,
+    cursor: "pointer",
+    fontWeight: 600,
+  },
+  tabActive: {
+    border: "1px solid #111827",
+    background: "#111827",
+    color: "#fff",
+    padding: "10px 14px",
+    borderRadius: 10,
+    cursor: "pointer",
+    fontWeight: 600,
+  },
   watchlistCard: {
     background: "#fff",
     borderRadius: 16,
     padding: 14,
-    marginTop: 16,
     marginBottom: 16,
     boxShadow: "0 10px 30px rgba(0,0,0,0.06)",
   },
@@ -370,29 +409,6 @@ const styles = {
     marginTop: 10,
     fontSize: 12,
     color: "#6b7280",
-  },
-  tabs: {
-    display: "flex",
-    gap: 8,
-    marginBottom: 16,
-  },
-  tab: {
-    border: "1px solid #d1d5db",
-    background: "#fff",
-    color: "#111827",
-    padding: "10px 14px",
-    borderRadius: 10,
-    cursor: "pointer",
-    fontWeight: 600,
-  },
-  tabActive: {
-    border: "1px solid #111827",
-    background: "#111827",
-    color: "#fff",
-    padding: "10px 14px",
-    borderRadius: 10,
-    cursor: "pointer",
-    fontWeight: 600,
   },
   card: {
     background: "#fff",
