@@ -37,12 +37,6 @@ export default function Home() {
       .catch(() => setStocks([]));
   };
 
-  const refreshAll = () => {
-    loadData();
-    loadStocks();
-    loadStatus();
-  };
-
   useEffect(() => {
     loadData();
   }, [endpoint]);
@@ -82,20 +76,21 @@ export default function Home() {
     <div style={styles.page}>
       <div style={styles.container}>
         <div style={styles.headerWrap}>
-          <div style={styles.eyebrow}>Công cụ cá nhân</div>
-          <h1 style={styles.title}>📊 Stock Dashboard</h1>
-          <div style={styles.subtitle}>
-            Giá thật + RSI + MA20/50/100 + MACD + breakout + score chuyên gia
-          </div>
-
-          <div style={styles.statusBar}>
-            <div style={styles.statusText}>
-              Lần cập nhật gần nhất:{" "}
-              <b>{formatDateTime(status?.last_updated) || "Chưa có dữ liệu"}</b>
+          <div style={styles.topRow}>
+            <div>
+              <div style={styles.eyebrow}>Công cụ cá nhân</div>
+              <h1 style={styles.title}>📊 Stock Dashboard</h1>
+              <div style={styles.subtitle}>
+                Giá thật + RSI + MA20/50/100 + MACD + breakout + score chuyên gia
+              </div>
             </div>
-            <button onClick={refreshAll} style={styles.refreshBtn}>
-              Refresh
-            </button>
+
+            <div style={styles.updatedBox}>
+              <div style={styles.updatedLabel}>Cập nhật gần nhất</div>
+              <div style={styles.updatedValue}>
+                {formatDateTime(status?.last_updated) || "Chưa có dữ liệu"}
+              </div>
+            </div>
           </div>
         </div>
 
@@ -126,7 +121,7 @@ export default function Home() {
           </div>
 
           <div style={styles.smallNote}>
-            Sau khi thêm/xóa mã, chạy lại workflow để cập nhật dữ liệu.
+            Thêm hoặc xóa mã ở đây. Sau đó chạy lại workflow để cập nhật dữ liệu mới.
           </div>
         </div>
 
@@ -251,7 +246,11 @@ function formatDateTime(value) {
   if (!value) return "";
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return "";
-  return d.toLocaleString("vi-VN");
+
+  return d.toLocaleString("vi-VN", {
+    timeZone: "Asia/Ho_Chi_Minh",
+    hour12: false,
+  }) + " GMT+7";
 }
 
 const styles = {
@@ -267,6 +266,30 @@ const styles = {
   },
   headerWrap: {
     marginBottom: 16,
+  },
+  topRow: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    gap: 12,
+    flexWrap: "wrap",
+  },
+  updatedBox: {
+    background: "#fff",
+    padding: 12,
+    borderRadius: 12,
+    minWidth: 220,
+    boxShadow: "0 10px 30px rgba(0,0,0,0.05)",
+  },
+  updatedLabel: {
+    fontSize: 12,
+    color: "#6b7280",
+    marginBottom: 4,
+  },
+  updatedValue: {
+    fontSize: 14,
+    fontWeight: 700,
+    color: "#111827",
   },
   eyebrow: {
     fontSize: 12,
@@ -285,30 +308,6 @@ const styles = {
     color: "#4b5563",
     fontSize: 14,
     lineHeight: 1.5,
-  },
-  statusBar: {
-    marginTop: 12,
-    display: "flex",
-    gap: 10,
-    alignItems: "center",
-    justifyContent: "space-between",
-    flexWrap: "wrap",
-    background: "#fff",
-    padding: 12,
-    borderRadius: 12,
-    boxShadow: "0 10px 30px rgba(0,0,0,0.05)",
-  },
-  statusText: {
-    fontSize: 13,
-    color: "#374151",
-  },
-  refreshBtn: {
-    padding: "10px 14px",
-    borderRadius: 10,
-    border: "none",
-    background: "#111827",
-    color: "#fff",
-    fontWeight: 700,
   },
   watchlistCard: {
     background: "#fff",
@@ -365,6 +364,7 @@ const styles = {
     fontSize: 18,
     cursor: "pointer",
     fontWeight: 700,
+    lineHeight: 1,
   },
   smallNote: {
     marginTop: 10,
