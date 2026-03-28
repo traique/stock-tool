@@ -1,16 +1,24 @@
 import { createClient } from "@supabase/supabase-js";
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_ROLE_KEY
-);
-
 export default async function handler(req, res) {
   if (req.method !== "GET") {
     return res.status(405).json({ error: "Method not allowed" });
   }
 
   try {
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+    if (!supabaseUrl) {
+      return res.status(500).json({ error: "Missing NEXT_PUBLIC_SUPABASE_URL" });
+    }
+
+    if (!serviceRoleKey) {
+      return res.status(500).json({ error: "Missing SUPABASE_SERVICE_ROLE_KEY" });
+    }
+
+    const supabase = createClient(supabaseUrl, serviceRoleKey);
+
     const { data: latestSignal, error: signalError } = await supabase
       .from("stock_signals")
       .select("symbol, ts, created_at")
@@ -19,7 +27,10 @@ export default async function handler(req, res) {
       .maybeSingle();
 
     if (signalError) {
-      return res.status(500).json({ error: signalError.message, where: "stock_signals" });
+      return res.status(500).json({
+        error: signalError.message,
+        where: "stock_signals",
+      });
     }
 
     const { data: systemStatus, error: statusError } = await supabase
@@ -29,7 +40,10 @@ export default async function handler(req, res) {
       .maybeSingle();
 
     if (statusError) {
-      return res.status(500).json({ error: statusError.message, where: "system_status" });
+      return res.status(500).json({
+        error: statusError.message,
+        where: "system_status",
+      });
     }
 
     return res.status(200).json({
