@@ -4,6 +4,8 @@ export default function Home() {
   const [mode, setMode] = useState("dashboard");
   const [items, setItems] = useState([]);
   const [stocks, setStocks] = useState([]);
+  const [goldItems, setGoldItems] = useState([]);
+  const [fuelItems, setFuelItems] = useState([]);
   const [newSymbol, setNewSymbol] = useState("");
   const [loading, setLoading] = useState(true);
   const [status, setStatus] = useState(null);
@@ -11,6 +13,8 @@ export default function Home() {
   const endpoint = useMemo(() => {
     if (mode === "dashboard") return "/api/prices";
     if (mode === "screener") return "/api/screener";
+    if (mode === "gold") return "/api/gold";
+    if (mode === "fuel") return "/api/fuel";
     return null;
   }, [mode]);
 
@@ -35,9 +39,18 @@ export default function Home() {
       setLoading(true);
       const res = await fetch(endpoint);
       const data = await res.json();
-      setItems(Array.isArray(data) ? data : []);
+
+      if (mode === "gold") {
+        setGoldItems(Array.isArray(data) ? data : []);
+      } else if (mode === "fuel") {
+        setFuelItems(Array.isArray(data) ? data : []);
+      } else {
+        setItems(Array.isArray(data) ? data : []);
+      }
     } catch {
-      setItems([]);
+      if (mode === "gold") setGoldItems([]);
+      else if (mode === "fuel") setFuelItems([]);
+      else setItems([]);
     } finally {
       setLoading(false);
     }
@@ -101,9 +114,9 @@ export default function Home() {
           <div style={styles.topRow}>
             <div style={styles.titleWrap}>
               <div style={styles.eyebrow}>Công cụ cá nhân</div>
-              <h1 style={styles.title}>📊 Stock Dashboard</h1>
+              <h1 style={styles.title}>📊 Stock Dashboard Pro</h1>
               <div style={styles.subtitle}>
-                Giá thật + RSI + MA20/50/100 + MACD + breakout + score chuyên gia
+                Cổ phiếu + tín hiệu giao dịch pro + giá vàng + giá xăng
               </div>
             </div>
 
@@ -128,23 +141,20 @@ export default function Home() {
         </div>
 
         <div style={styles.tabs}>
-          <button
-            onClick={() => setMode("dashboard")}
-            style={mode === "dashboard" ? styles.tabActive : styles.tab}
-          >
+          <button onClick={() => setMode("dashboard")} style={mode === "dashboard" ? styles.tabActive : styles.tab}>
             Dashboard
           </button>
-          <button
-            onClick={() => setMode("screener")}
-            style={mode === "screener" ? styles.tabActive : styles.tab}
-          >
+          <button onClick={() => setMode("screener")} style={mode === "screener" ? styles.tabActive : styles.tab}>
             Screener
           </button>
-          <button
-            onClick={() => setMode("watchlist")}
-            style={mode === "watchlist" ? styles.tabActive : styles.tab}
-          >
+          <button onClick={() => setMode("watchlist")} style={mode === "watchlist" ? styles.tabActive : styles.tab}>
             Watchlist
+          </button>
+          <button onClick={() => setMode("gold")} style={mode === "gold" ? styles.tabActive : styles.tab}>
+            Giá vàng
+          </button>
+          <button onClick={() => setMode("fuel")} style={mode === "fuel" ? styles.tabActive : styles.tab}>
+            Giá xăng
           </button>
         </div>
 
@@ -181,12 +191,56 @@ export default function Home() {
           </div>
         ) : loading ? (
           <div style={styles.empty}>Đang tải...</div>
+        ) : mode === "gold" ? (
+          goldItems.length === 0 ? (
+            <div style={styles.empty}>Chưa có dữ liệu giá vàng</div>
+          ) : (
+            goldItems.map((item, idx) => (
+              <div key={`${item.source}-${item.gold_type}-${idx}`} style={styles.card}>
+                <div style={styles.cardTop}>
+                  <div>
+                    <div style={styles.symbol}>{item.gold_type}</div>
+                    <div style={styles.meta}>{item.source}</div>
+                  </div>
+                </div>
+
+                <div style={styles.grid}>
+                  <Metric title="Mua vào" value={formatPrice(item.buy_price)} />
+                  <Metric title="Bán ra" value={formatPrice(item.sell_price)} />
+                </div>
+
+                <div style={styles.noteBox}>
+                  <div style={styles.noteTitle}>Cập nhật</div>
+                  <div style={styles.noteText}>{formatDateTime(item.price_time)}</div>
+                </div>
+              </div>
+            ))
+          )
+        ) : mode === "fuel" ? (
+          fuelItems.length === 0 ? (
+            <div style={styles.empty}>Chưa có dữ liệu giá xăng</div>
+          ) : (
+            fuelItems.map((item, idx) => (
+              <div key={`${item.fuel_type}-${idx}`} style={styles.card}>
+                <div style={styles.cardTop}>
+                  <div>
+                    <div style={styles.symbol}>{item.fuel_type}</div>
+                    <div style={styles.meta}>{item.unit || "VND/liter"}</div>
+                  </div>
+                </div>
+
+                <div style={styles.grid}>
+                  <Metric title="Giá hiện tại" value={formatPrice(item.price)} />
+                  <Metric title="Hiệu lực" value={formatDateTime(item.effective_time)} />
+                </div>
+              </div>
+            ))
+          )
         ) : items.length === 0 ? (
           <div style={styles.empty}>Chưa có dữ liệu phù hợp</div>
         ) : (
           items.map((item, idx) => {
             const f = item.fundamental || {};
-
             return (
               <div key={`${item.symbol}-${idx}`} style={styles.card}>
                 <div style={styles.cardTop}>
@@ -201,9 +255,23 @@ export default function Home() {
                   </div>
                 </div>
 
+                <div style={styles.actionStrip}>
+                  <span style={getActionStyle(item.signal_action)}>
+                    {item.signal_action || "WATCH"}
+                  </span>
+                  {item.signal_strength ? (
+                    <span style={styles.badgeGray}>{item.signal_strength}</span>
+                  ) : null}
+                  {item.setup_type ? (
+                    <span style={styles.badgeBlue}>{item.setup_type}</span>
+                  ) : null}
+                  {item.confidence_score != null ? (
+                    <span style={styles.badgeGreen}>Conf {formatNum(item.confidence_score)}</span>
+                  ) : null}
+                </div>
+
                 <div style={styles.grid}>
                   <Metric title="Giá" value={formatNum(item.close)} />
-
                   <Metric
                     title="RSI"
                     value={formatNum(item.rsi)}
@@ -222,26 +290,22 @@ export default function Home() {
                         : "#111827"
                     }
                   />
-
                   <Metric
                     title="MA"
                     value={`20: ${formatNum(item.ma20)}`}
                     sub={`50: ${formatNum(item.ma50)} · 100: ${formatNum(item.ma100)}`}
                   />
-
                   <Metric
                     title="MACD"
                     value={formatNum(item.macd)}
                     sub={`Signal: ${formatNum(item.macd_signal)}`}
                     color={item.macd > 0 ? "#16a34a" : "#dc2626"}
                   />
-
                   <Metric
                     title="Volume"
                     value={formatNum(item.volume_ratio)}
                     sub={`MA20: ${formatNum(item.volume_ma20)}`}
                   />
-
                   <Metric
                     title="Breakout"
                     value={item.breakout_55 ? "55 phiên" : item.breakout_20 ? "20 phiên" : "-"}
@@ -259,7 +323,36 @@ export default function Home() {
                   ) : null}
                 </div>
 
-                {item.expert_note ? (
+                <div style={styles.tradePlanBox}>
+                  <div style={styles.noteTitle}>Kế hoạch giao dịch</div>
+                  <div style={styles.tradeGrid}>
+                    <TradeField label="Điểm vào" value={formatNum(item.entry_price)} />
+                    <TradeField
+                      label="Vùng mua"
+                      value={
+                        item.entry_zone_low != null && item.entry_zone_high != null
+                          ? `${formatNum(item.entry_zone_low)} - ${formatNum(item.entry_zone_high)}`
+                          : "-"
+                      }
+                    />
+                    <TradeField label="SL" value={formatNum(item.stop_loss)} />
+                    <TradeField label="TP1" value={formatNum(item.take_profit_1)} />
+                    <TradeField label="TP2" value={formatNum(item.take_profit_2)} />
+                    <TradeField label="Trailing" value={formatNum(item.trailing_stop)} />
+                    <TradeField label="R/R" value={formatNum(item.risk_reward_ratio)} />
+                    <TradeField
+                      label="Tỷ trọng"
+                      value={item.position_size_pct != null ? `${formatNum(item.position_size_pct)}%` : "-"}
+                    />
+                  </div>
+                </div>
+
+                {item.expert_strategy_note ? (
+                  <div style={styles.noteBox}>
+                    <div style={styles.noteTitle}>Nhận định chuyên gia</div>
+                    <div style={styles.noteText}>{item.expert_strategy_note}</div>
+                  </div>
+                ) : item.expert_note ? (
                   <div style={styles.noteBox}>
                     <div style={styles.noteTitle}>Nhận định</div>
                     <div style={styles.noteText}>{item.expert_note}</div>
@@ -295,9 +388,23 @@ function Metric({ title, value, sub, color }) {
   );
 }
 
+function TradeField({ label, value }) {
+  return (
+    <div style={styles.tradeField}>
+      <div style={styles.tradeLabel}>{label}</div>
+      <div style={styles.tradeValue}>{value}</div>
+    </div>
+  );
+}
+
 function formatNum(value) {
   if (value == null || Number.isNaN(Number(value))) return "-";
   return Number(value).toFixed(2);
+}
+
+function formatPrice(value) {
+  if (value == null || Number.isNaN(Number(value))) return "-";
+  return Number(value).toLocaleString("vi-VN");
 }
 
 function formatDateTime(value) {
@@ -317,6 +424,14 @@ function formatDateTime(value) {
       second: "2-digit",
     }) + " GMT+7"
   );
+}
+
+function getActionStyle(action) {
+  if (action === "BUY") return styles.actionBuy;
+  if (action === "HOLD") return styles.actionHold;
+  if (action === "TAKE_PROFIT") return styles.actionTp;
+  if (action === "SELL" || action === "CUT_LOSS") return styles.actionSell;
+  return styles.actionWatch;
 }
 
 const styles = {
@@ -514,6 +629,52 @@ const styles = {
     fontWeight: 800,
     color: "#111827",
   },
+  actionStrip: {
+    display: "flex",
+    gap: 8,
+    flexWrap: "wrap",
+    marginBottom: 12,
+  },
+  actionBuy: {
+    background: "#dcfce7",
+    color: "#166534",
+    padding: "6px 10px",
+    borderRadius: 999,
+    fontWeight: 700,
+    fontSize: 12,
+  },
+  actionHold: {
+    background: "#dbeafe",
+    color: "#1d4ed8",
+    padding: "6px 10px",
+    borderRadius: 999,
+    fontWeight: 700,
+    fontSize: 12,
+  },
+  actionWatch: {
+    background: "#fef3c7",
+    color: "#92400e",
+    padding: "6px 10px",
+    borderRadius: 999,
+    fontWeight: 700,
+    fontSize: 12,
+  },
+  actionTp: {
+    background: "#ffedd5",
+    color: "#c2410c",
+    padding: "6px 10px",
+    borderRadius: 999,
+    fontWeight: 700,
+    fontSize: 12,
+  },
+  actionSell: {
+    background: "#fee2e2",
+    color: "#b91c1c",
+    padding: "6px 10px",
+    borderRadius: 999,
+    fontWeight: 700,
+    fontSize: 12,
+  },
   grid: {
     display: "grid",
     gridTemplateColumns: "1fr 1fr",
@@ -585,6 +746,32 @@ const styles = {
     borderRadius: 999,
     fontWeight: 700,
     fontSize: 12,
+  },
+  tradePlanBox: {
+    marginTop: 12,
+    background: "#eff6ff",
+    borderRadius: 12,
+    padding: 10,
+  },
+  tradeGrid: {
+    display: "grid",
+    gridTemplateColumns: "1fr 1fr",
+    gap: 10,
+  },
+  tradeField: {
+    background: "#fff",
+    borderRadius: 10,
+    padding: 10,
+  },
+  tradeLabel: {
+    fontSize: 12,
+    color: "#6b7280",
+    marginBottom: 4,
+  },
+  tradeValue: {
+    fontSize: 16,
+    fontWeight: 700,
+    color: "#111827",
   },
   noteBox: {
     marginTop: 12,
