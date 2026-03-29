@@ -26,18 +26,24 @@ def fetch_html(url):
     return res.text
 
 
-def parse_number(value):
-    if value is None:
+def parse_number(text):
+    if text is None:
         return None
-    text = str(value).strip().replace("\xa0", " ").replace(" ", "")
-    digits = re.sub(r"[^\d]", "", text)
+
+    value = str(text).strip().replace("\xa0", " ").replace(" ", "")
+    digits = re.sub(r"[^\d]", "", value)
     if not digits:
         return None
-    return float(digits)
+
+    try:
+        return float(digits)
+    except Exception:
+        return None
 
 
 def normalize_fuel_name(name):
     text = str(name).strip()
+
     mapping = {
         "Xăng RON 95-V": "RON95-V",
         "Xăng RON 95-III": "RON95-III",
@@ -46,14 +52,11 @@ def normalize_fuel_name(name):
         "DO 0,001S-V": "Diesel 0.001S-V",
         "DO 0,05S-II": "Diesel 0.05S-II",
         "Dầu hỏa 2-K": "Dầu hỏa 2-K",
-        "Dầu hỏa": "Dầu hỏa",
         "Mazút 2B (3,5S)": "Mazut 2B (3.5S)",
         "Mazút 180cst 0,5S (RMG)": "Mazut 180cst 0.5S (RMG)",
     }
-    for k, v in mapping.items():
-        if k.lower() == text.lower():
-            return v
-    return text
+
+    return mapping.get(text, text)
 
 
 def parse_effective_time():
@@ -62,6 +65,7 @@ def parse_effective_time():
         soup = BeautifulSoup(html, "lxml")
         text = soup.get_text("\n", strip=True)
 
+        # ví dụ: 15 giờ 00 phút ngày 27.3.2026
         m = re.search(
             r"(\d{1,2})\s*giờ\s*(\d{2})\s*phút\s*ngày\s*(\d{1,2})\.(\d{1,2})\.(\d{4})",
             text,
@@ -76,9 +80,7 @@ def parse_effective_time():
         month = int(m.group(4))
         year = int(m.group(5))
 
-        # lấy mốc VN time rồi lưu UTC đơn giản
-        dt = datetime(year, month, day, hour, minute, tzinfo=timezone.utc)
-        return dt
+        return datetime(year, month, day, hour, minute, tzinfo=timezone.utc)
     except Exception:
         return datetime.now(timezone.utc)
 
@@ -86,10 +88,11 @@ def parse_effective_time():
 def scrape_fuel():
     html = fetch_html(PETROLIMEX_HANOI_URL)
     soup = BeautifulSoup(html, "lxml")
-    text = soup.get_text("\n", strip=True)
-    lines = [x.strip() for x in text.splitlines() if x.strip()]
+    text = soup.get_text(" ", strip=True)
 
-    keywords = [
+    effective_time = parse_effective_time()
+
+    product_names = [
         "Xăng RON 95-V",
         "Xăng RON 95-III",
         "Xăng E10 RON 95-III",
@@ -101,31 +104,40 @@ def scrape_fuel():
         "Mazút 180cst 0,5S (RMG)",
     ]
 
-    effective_time = parse_effective_time()
     rows = []
 
-    i = 0
-    while i < len(lines) - 2:
-        name = lines[i]
+    for product in product_names:
+        # ví dụ match:
+        # Xăng RON 95-V · 24.730, 25.220
+        # Xăng RON 95-III, 24.330, 24.810
+        # DO 0,001S-V ... 20.680, 21.090
+        pattern = re.compile(
+            rf"{re.escape(product)}\s*[·,:-]?\s*([\d\.,]+)\s*,\s*([\d\.,]+)",
+            flags=re.IGNORECASE,
+        )
 
-        if any(k.lower() == name.lower() for k in keywords):
-            # vùng 1, vùng 2
-            p1 = parse_number(lines[i + 1])
-            p2 = parse_number(lines[i + 2])
+        m = pattern.search(text)
+        if not m:
+            continue
 
-            if p1 is not None:
-                rows.append(
-                    {
-                        "fuel_type": normalize_fuel_name(name),
-                        "price": p1,
-                        "unit": "VND/liter",
-                        "effective_time": effective_time,
-                    }
-                )
-                i += 3
-                continue
-        i += 1
+        region_1 = parse_number(m.group(1))
+        region_2 = parse_number(m.group(2))
 
+        if region_1 is None:
+            continue
+
+        unit = "VND/kg" if "Mazút" in product or "Mazut" in product else "VND/liter"
+
+        rows.append(
+            {
+                "fuel_type": normalize_fuel_name(product),
+                "price": region_1,
+                "unit": unit,
+                "effective_time": effective_time,
+            }
+        )
+
+    # dedup
     dedup = {}
     for row in rows:
         dedup[row["fuel_type"]] = row
