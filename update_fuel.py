@@ -8,8 +8,8 @@ from bs4 import BeautifulSoup
 
 DB_URL = os.environ["DB_URL"]
 
-PETROLIMEX_HANOI_URL = "https://hanoi.petrolimex.com.vn/index.html"
 PETROLIMEX_PRESS_URL = "https://www.petrolimex.com.vn/ndi/thong-cao-bao-chi.html"
+FUEL_NEWS_FALLBACK_URL = "https://dtinews.dantri.com.vn/vietnam-today/vietnam-cuts-fuel-prices-again-after-tax-reductions-20260327050401386.htm"
 
 
 def log(message):
@@ -34,22 +34,6 @@ def parse_number(text):
     if not digits:
         return None
     return float(digits)
-
-
-def normalize_fuel_name(name):
-    text = str(name).strip()
-    mapping = {
-        "Xăng RON 95-V": "RON95-V",
-        "Xăng RON 95-III": "RON95-III",
-        "Xăng E10 RON 95-III": "E10 RON95-III",
-        "Xăng E5 RON 92-II": "E5 RON92-II",
-        "DO 0,001S-V": "Diesel 0.001S-V",
-        "DO 0,05S-II": "Diesel 0.05S-II",
-        "Dầu hỏa 2-K": "Dầu hỏa 2-K",
-        "Mazút 2B (3,5S)": "Mazut 2B (3.5S)",
-        "Mazút 180cst 0,5S (RMG)": "Mazut 180cst 0.5S (RMG)",
-    }
-    return mapping.get(text, text)
 
 
 def parse_effective_time():
@@ -77,68 +61,56 @@ def parse_effective_time():
         return datetime.now(timezone.utc)
 
 
-def build_pattern(product):
-    # Chấp nhận:
-    # Xăng RON 95-V · 24.730, 25.220
-    # Xăng RON 95-III, 24.330, 24.810
-    # Xăng RON 95-V : 24.730 25.220
-    return re.compile(
-        rf"{re.escape(product)}"
-        rf"(?:\s*[·,:;-]?\s*|\s+)"
-        rf"([\d][\d\.,]*)"
-        rf"(?:\s*,\s*|\s+)"
-        rf"([\d][\d\.,]*)",
-        flags=re.IGNORECASE,
-    )
+def normalize_fuel_name(name):
+    mapping = {
+        "E5 RON 92": ("E5 RON92", "VND/liter"),
+        "RON 95": ("RON95-III", "VND/liter"),
+        "Diesel": ("Diesel", "VND/liter"),
+        "Kerosene": ("Dầu hỏa", "VND/liter"),
+        "Mazut": ("Mazut", "VND/kg"),
+    }
+    return mapping[name]
 
 
-def scrape_fuel():
-    html = fetch_html(PETROLIMEX_HANOI_URL)
+def scrape_from_dtinews():
+    html = fetch_html(FUEL_NEWS_FALLBACK_URL)
     soup = BeautifulSoup(html, "lxml")
     text = soup.get_text(" ", strip=True)
     text = re.sub(r"\s+", " ", text)
 
     effective_time = parse_effective_time()
 
-    product_names = [
-        "Xăng RON 95-V",
-        "Xăng RON 95-III",
-        "Xăng E10 RON 95-III",
-        "Xăng E5 RON 92-II",
-        "DO 0,001S-V",
-        "DO 0,05S-II",
-        "Dầu hỏa 2-K",
-        "Mazút 2B (3,5S)",
-        "Mazút 180cst 0,5S (RMG)",
-    ]
+    patterns = {
+        "E5 RON 92": r"E5\s*RON\s*92[^0-9]{0,40}(\d{1,3}(?:\.\d{3})+)",
+        "RON 95": r"RON\s*95[^0-9]{0,40}(\d{1,3}(?:\.\d{3})+)",
+        "Diesel": r"Diesel[^0-9]{0,40}(\d{1,3}(?:\.\d{3})+)",
+        "Kerosene": r"kerosene[^0-9]{0,40}(\d{1,3}(?:\.\d{3})+)",
+        "Mazut": r"mazut[^0-9]{0,40}(\d{1,3}(?:\.\d{3})+)",
+    }
 
     rows = []
 
-    for product in product_names:
-        pattern = build_pattern(product)
-        m = pattern.search(text)
+    for label, pattern in patterns.items():
+        m = re.search(pattern, text, flags=re.IGNORECASE)
         if not m:
-            log(f"MISS {product}")
+            log(f"MISS {label}")
             continue
 
-        region_1 = parse_number(m.group(1))
-        region_2 = parse_number(m.group(2))
-
-        log(f"MATCH {product} | raw1={m.group(1)} raw2={m.group(2)}")
-
-        if region_1 is None:
+        price = parse_number(m.group(1))
+        if price is None:
+            log(f"MISS {label} | parse_number")
             continue
 
-        unit = "VND/kg" if "Mazút" in product or "Mazut" in product else "VND/liter"
-
+        fuel_type, unit = normalize_fuel_name(label)
         rows.append(
             {
-                "fuel_type": normalize_fuel_name(product),
-                "price": region_1,
+                "fuel_type": fuel_type,
+                "price": price,
                 "unit": unit,
                 "effective_time": effective_time,
             }
         )
+        log(f"MATCH {label} | price={price}")
 
     dedup = {}
     for row in rows:
@@ -192,7 +164,7 @@ def main():
     cur = conn.cursor()
 
     try:
-        rows = scrape_fuel()
+        rows = scrape_from_dtinews()
         log(f"Fuel parsed {len(rows)} rows")
 
         if len(rows) == 0:
