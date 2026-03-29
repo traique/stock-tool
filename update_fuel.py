@@ -8,8 +8,8 @@ from bs4 import BeautifulSoup
 
 DB_URL = os.environ["DB_URL"]
 
+FUEL_SOURCE_URL = "https://giaxanghomnay.com/"
 PETROLIMEX_PRESS_URL = "https://www.petrolimex.com.vn/ndi/thong-cao-bao-chi.html"
-FUEL_NEWS_FALLBACK_URL = "https://dtinews.dantri.com.vn/vietnam-today/vietnam-cuts-fuel-prices-again-after-tax-reductions-20260327050401386.htm"
 
 
 def log(message):
@@ -61,47 +61,39 @@ def parse_effective_time():
         return datetime.now(timezone.utc)
 
 
-def normalize_fuel_name(name):
-    mapping = {
-        "E5 RON 92": ("E5 RON92", "VND/liter"),
-        "RON 95": ("RON95-III", "VND/liter"),
-        "Diesel": ("Diesel", "VND/liter"),
-        "Kerosene": ("Dầu hỏa", "VND/liter"),
-        "Mazut": ("Mazut", "VND/kg"),
-    }
-    return mapping[name]
-
-
-def scrape_from_dtinews():
-    html = fetch_html(FUEL_NEWS_FALLBACK_URL)
+def scrape_fuel():
+    html = fetch_html(FUEL_SOURCE_URL)
     soup = BeautifulSoup(html, "lxml")
-    text = soup.get_text(" ", strip=True)
+    text = soup.get_text("\n", strip=True)
     text = re.sub(r"\s+", " ", text)
 
     effective_time = parse_effective_time()
 
-    patterns = {
-        "E5 RON 92": r"E5\s*RON\s*92[^0-9]{0,40}(\d{1,3}(?:\.\d{3})+)",
-        "RON 95": r"RON\s*95[^0-9]{0,40}(\d{1,3}(?:\.\d{3})+)",
-        "Diesel": r"Diesel[^0-9]{0,40}(\d{1,3}(?:\.\d{3})+)",
-        "Kerosene": r"kerosene[^0-9]{0,40}(\d{1,3}(?:\.\d{3})+)",
-        "Mazut": r"mazut[^0-9]{0,40}(\d{1,3}(?:\.\d{3})+)",
-    }
+    patterns = [
+        ("RON95-V", r"Xăng\s*RON\s*95-V.*?(\d{1,3}(?:[.,]\d{3})+)"),
+        ("RON95-III", r"Xăng\s*RON\s*95-III.*?(\d{1,3}(?:[.,]\d{3})+)"),
+        ("E5 RON92-II", r"Xăng\s*E5\s*RON\s*92-II.*?(\d{1,3}(?:[.,]\d{3})+)"),
+        ("E10 RON95-III", r"Xăng\s*E10\s*RON\s*95-III.*?(\d{1,3}(?:[.,]\d{3})+)"),
+        ("Diesel 0.05S-II", r"DO\s*0,05S-II.*?(\d{1,3}(?:[.,]\d{3})+)"),
+        ("Diesel 0.001S-V", r"DO\s*0,001S-V.*?(\d{1,3}(?:[.,]\d{3})+)"),
+        ("Dầu hỏa 2-K", r"Dầu\s*hỏa\s*2-K.*?(\d{1,3}(?:[.,]\d{3})+)"),
+        ("Mazut", r"Maz[uú]t.*?(\d{1,3}(?:[.,]\d{3})+)"),
+    ]
 
     rows = []
-
-    for label, pattern in patterns.items():
+    for fuel_type, pattern in patterns:
         m = re.search(pattern, text, flags=re.IGNORECASE)
         if not m:
-            log(f"MISS {label}")
+            log(f"MISS {fuel_type}")
             continue
 
         price = parse_number(m.group(1))
         if price is None:
-            log(f"MISS {label} | parse_number")
+            log(f"MISS {fuel_type} | parse_number")
             continue
 
-        fuel_type, unit = normalize_fuel_name(label)
+        unit = "VND/kg" if "Mazut" in fuel_type else "VND/liter"
+
         rows.append(
             {
                 "fuel_type": fuel_type,
@@ -110,7 +102,7 @@ def scrape_from_dtinews():
                 "effective_time": effective_time,
             }
         )
-        log(f"MATCH {label} | price={price}")
+        log(f"MATCH {fuel_type} | price={price}")
 
     dedup = {}
     for row in rows:
@@ -164,7 +156,7 @@ def main():
     cur = conn.cursor()
 
     try:
-        rows = scrape_from_dtinews()
+        rows = scrape_fuel()
         log(f"Fuel parsed {len(rows)} rows")
 
         if len(rows) == 0:
