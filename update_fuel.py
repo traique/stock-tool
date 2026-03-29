@@ -61,48 +61,87 @@ def parse_effective_time():
         return datetime.now(timezone.utc)
 
 
+def normalize_lines(text):
+    raw_lines = [x.strip() for x in text.splitlines()]
+    lines = []
+    for line in raw_lines:
+        line = re.sub(r"\s+", " ", line).strip()
+        if line:
+            lines.append(line)
+    return lines
+
+
+def extract_best_price_from_text_block(block):
+    candidates = re.findall(r"\d{1,3}(?:[.,]\d{3})+", block)
+    nums = []
+
+    for c in candidates:
+        n = parse_number(c)
+        if n is None:
+            continue
+        # lọc biên hợp lý cho giá xăng dầu VN
+        if 10000 <= n <= 100000:
+            nums.append(n)
+
+    if not nums:
+        return None
+
+    return max(nums)
+
+
 def scrape_fuel():
     html = fetch_html(FUEL_SOURCE_URL)
     soup = BeautifulSoup(html, "lxml")
     text = soup.get_text("\n", strip=True)
-    text = re.sub(r"\s+", " ", text)
+    lines = normalize_lines(text)
 
     effective_time = parse_effective_time()
 
-    patterns = [
-        ("RON95-V", r"Xăng\s*RON\s*95-V.*?(\d{1,3}(?:[.,]\d{3})+)"),
-        ("RON95-III", r"Xăng\s*RON\s*95-III.*?(\d{1,3}(?:[.,]\d{3})+)"),
-        ("E5 RON92-II", r"Xăng\s*E5\s*RON\s*92-II.*?(\d{1,3}(?:[.,]\d{3})+)"),
-        ("E10 RON95-III", r"Xăng\s*E10\s*RON\s*95-III.*?(\d{1,3}(?:[.,]\d{3})+)"),
-        ("Diesel 0.05S-II", r"DO\s*0,05S-II.*?(\d{1,3}(?:[.,]\d{3})+)"),
-        ("Diesel 0.001S-V", r"DO\s*0,001S-V.*?(\d{1,3}(?:[.,]\d{3})+)"),
-        ("Dầu hỏa 2-K", r"Dầu\s*hỏa\s*2-K.*?(\d{1,3}(?:[.,]\d{3})+)"),
-        ("Mazut", r"Maz[uú]t.*?(\d{1,3}(?:[.,]\d{3})+)"),
+    products = [
+        ("RON95-V", ["Xăng RON 95-V"]),
+        ("RON95-III", ["Xăng RON 95-III"]),
+        ("E10 RON95-III", ["Xăng E10 RON 95-III"]),
+        ("E5 RON92-II", ["Xăng E5 RON 92-II"]),
+        ("Diesel 0.001S-V", ["DO 0,001S-V"]),
+        ("Diesel 0.05S-II", ["DO 0,05S-II"]),
+        ("Dầu hỏa 2-K", ["Dầu hỏa 2-K"]),
+        ("Mazut", ["Mazút", "Mazut"]),
     ]
 
     rows = []
-    for fuel_type, pattern in patterns:
-        m = re.search(pattern, text, flags=re.IGNORECASE)
-        if not m:
+
+    for fuel_type, keywords in products:
+        matched_price = None
+
+        for idx, line in enumerate(lines):
+            lower_line = line.lower()
+            if not any(k.lower() in lower_line for k in keywords):
+                continue
+
+            # gom block xung quanh dòng match để bắt giá gần nhất
+            block_lines = lines[idx : min(idx + 6, len(lines))]
+            block = " | ".join(block_lines)
+
+            price = extract_best_price_from_text_block(block)
+            if price is not None:
+                matched_price = price
+                log(f"MATCH {fuel_type} | price={price} | line={line}")
+                break
+
+        if matched_price is None:
             log(f"MISS {fuel_type}")
             continue
 
-        price = parse_number(m.group(1))
-        if price is None:
-            log(f"MISS {fuel_type} | parse_number")
-            continue
-
-        unit = "VND/kg" if "Mazut" in fuel_type else "VND/liter"
+        unit = "VND/kg" if fuel_type == "Mazut" else "VND/liter"
 
         rows.append(
             {
                 "fuel_type": fuel_type,
-                "price": price,
+                "price": matched_price,
                 "unit": unit,
                 "effective_time": effective_time,
             }
         )
-        log(f"MATCH {fuel_type} | price={price}")
 
     dedup = {}
     for row in rows:
