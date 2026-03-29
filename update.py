@@ -34,6 +34,16 @@ def calc_macd(series):
     return macd, signal, hist
 
 
+def calc_atr(df, period=14):
+    high_low = df["high"] - df["low"]
+    high_close = (df["high"] - df["close"].shift(1)).abs()
+    low_close = (df["low"] - df["close"].shift(1)).abs()
+
+    tr = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
+    atr = tr.rolling(period).mean()
+    return atr
+
+
 def normalize_df(df):
     if df is None or len(df) == 0:
         return pd.DataFrame()
@@ -115,57 +125,6 @@ def detect_price_action(df):
     return "neutral"
 
 
-def build_expert_note(last):
-    notes = []
-
-    ma20 = last["ma20"]
-    ma50 = last["ma50"]
-    ma100 = last["ma100"]
-    close = last["close"]
-    rsi = last["rsi"]
-    macd = last["macd"]
-    macd_signal = last["macd_signal"]
-    volume_ratio = last["volume_ratio"]
-
-    if (
-        pd.notna(close)
-        and pd.notna(ma20)
-        and pd.notna(ma50)
-        and pd.notna(ma100)
-        and close > ma20 > ma50 > ma100
-    ):
-        notes.append("Xu hướng tăng khỏe")
-    elif pd.notna(close) and pd.notna(ma20) and close > ma20:
-        notes.append("Giá nằm trên MA20")
-    else:
-        notes.append("Xu hướng chưa mạnh")
-
-    if pd.notna(rsi):
-        if 50 <= rsi <= 70:
-            notes.append("Động lượng tích cực")
-        elif rsi > 70:
-            notes.append("Đang quá mua")
-        elif rsi < 30:
-            notes.append("Đang quá bán")
-
-    if pd.notna(macd) and pd.notna(macd_signal) and macd > macd_signal:
-        notes.append("MACD ủng hộ xu hướng tăng")
-
-    if bool(last["breakout_20"]):
-        notes.append("Breakout 20 phiên")
-
-    if bool(last["breakout_55"]):
-        notes.append("Breakout 55 phiên")
-
-    if pd.notna(volume_ratio) and volume_ratio >= 1.5:
-        notes.append("Khối lượng tăng mạnh")
-
-    if not notes:
-        return "Trạng thái trung tính"
-
-    return " · ".join(notes)
-
-
 def trim_old_price_bars(cur, symbol):
     cur.execute(
         """
@@ -193,6 +152,263 @@ def fetch_history(symbol):
         interval="1D",
     )
     return normalize_df(raw_df)
+
+
+def build_expert_note(last):
+    notes = []
+
+    if last["close"] > last["ma20"] > last["ma50"] > last["ma100"]:
+        notes.append("Xu hướng tăng khỏe")
+    elif last["close"] > last["ma20"]:
+        notes.append("Giá nằm trên MA20")
+    else:
+        notes.append("Xu hướng chưa mạnh")
+
+    if pd.notna(last["rsi"]):
+        if 50 <= last["rsi"] <= 70:
+            notes.append("Động lượng tích cực")
+        elif last["rsi"] > 70:
+            notes.append("Đang quá mua")
+        elif last["rsi"] < 30:
+            notes.append("Đang quá bán")
+
+    if pd.notna(last["macd"]) and pd.notna(last["macd_signal"]) and last["macd"] > last["macd_signal"]:
+        notes.append("MACD ủng hộ xu hướng tăng")
+
+    if bool(last["breakout_20"]):
+        notes.append("Breakout 20 phiên")
+
+    if bool(last["breakout_55"]):
+        notes.append("Breakout 55 phiên")
+
+    if pd.notna(last["volume_ratio"]) and last["volume_ratio"] >= 1.5:
+        notes.append("Khối lượng tăng mạnh")
+
+    if not notes:
+        return "Trạng thái trung tính"
+
+    return " · ".join(notes)
+
+
+def detect_setup_type(last):
+    if bool(last["breakout_55"]):
+        return "BREAKOUT_55"
+    if bool(last["breakout_20"]):
+        return "BREAKOUT_20"
+
+    if (
+        pd.notna(last["distance_ma20"])
+        and -2.0 <= float(last["distance_ma20"]) <= 2.0
+        and pd.notna(last["ma20"])
+        and pd.notna(last["ma50"])
+        and float(last["ma20"]) > float(last["ma50"])
+        and float(last["close"]) > float(last["ma50"])
+    ):
+        return "PULLBACK_MA20"
+
+    if (
+        pd.notna(last["ma20"])
+        and pd.notna(last["ma50"])
+        and pd.notna(last["ma100"])
+        and float(last["close"]) > float(last["ma20"]) > float(last["ma50"]) > float(last["ma100"])
+    ):
+        return "TREND_CONTINUATION"
+
+    return "NONE"
+
+
+def build_trade_plan(df):
+    last = df.iloc[-1]
+    recent_high_20 = float(df.tail(20)["high"].max())
+    recent_low_5 = float(df.tail(5)["low"].min())
+    recent_low_10 = float(df.tail(10)["low"].min())
+    atr = float(last["atr"]) if pd.notna(last["atr"]) else None
+    close = float(last["close"])
+    ma20 = float(last["ma20"]) if pd.notna(last["ma20"]) else None
+
+    setup_type = detect_setup_type(last)
+
+    entry_price = close
+    entry_zone_low = None
+    entry_zone_high = None
+    stop_loss = None
+    tp1 = None
+    tp2 = None
+    trailing_stop = None
+    rr = None
+    position_size_pct = 0
+    signal_action = "WATCH"
+    signal_strength = "WEAK"
+    confidence_score = 50
+
+    if setup_type in ["BREAKOUT_55", "BREAKOUT_20"]:
+        entry_price = close
+        entry_zone_low = round(close * 0.995, 2)
+        entry_zone_high = round(close * 1.015, 2)
+
+        base_stop = recent_low_5
+        if ma20 is not None:
+            base_stop = min(base_stop, ma20)
+
+        if atr is not None:
+            stop_loss = round(base_stop - atr * 0.35, 2)
+        else:
+            stop_loss = round(base_stop * 0.985, 2)
+
+        risk = entry_price - stop_loss
+        if risk > 0:
+            tp1 = round(entry_price + risk * 1.5, 2)
+            tp2 = round(entry_price + risk * 2.5, 2)
+            rr = round((tp2 - entry_price) / risk, 2)
+            trailing_stop = round(max(stop_loss, entry_price - risk * 0.8), 2)
+
+        strong_breakout = (
+            pd.notna(last["volume_ratio"]) and float(last["volume_ratio"]) >= 1.3
+            and pd.notna(last["rsi"]) and 55 <= float(last["rsi"]) <= 72
+            and pd.notna(last["macd"]) and pd.notna(last["macd_signal"]) and float(last["macd"]) > float(last["macd_signal"])
+        )
+
+        if strong_breakout and rr is not None and rr >= 2:
+            signal_action = "BUY"
+            signal_strength = "STRONG"
+            position_size_pct = 20
+            confidence_score = 85
+        else:
+            signal_action = "BUY"
+            signal_strength = "MEDIUM"
+            position_size_pct = 12
+            confidence_score = 74
+
+    elif setup_type == "PULLBACK_MA20":
+        if ma20 is not None:
+            entry_zone_low = round(ma20 * 0.995, 2)
+            entry_zone_high = round(ma20 * 1.01, 2)
+            entry_price = round((entry_zone_low + entry_zone_high) / 2, 2)
+
+        base_stop = recent_low_10
+        if atr is not None:
+            stop_loss = round(base_stop - atr * 0.25, 2)
+        else:
+            stop_loss = round(base_stop * 0.985, 2)
+
+        risk = entry_price - stop_loss
+        target = recent_high_20
+        if risk > 0:
+            tp1 = round(target, 2)
+            tp2 = round(max(target * 1.06, entry_price + risk * 2.0), 2)
+            rr = round((tp2 - entry_price) / risk, 2)
+            trailing_stop = round(max(stop_loss, recent_low_5), 2)
+
+        if rr is not None and rr >= 1.8:
+            signal_action = "BUY"
+            signal_strength = "MEDIUM"
+            position_size_pct = 10
+            confidence_score = 72
+        else:
+            signal_action = "WATCH"
+            signal_strength = "MEDIUM"
+            position_size_pct = 0
+            confidence_score = 62
+
+    elif setup_type == "TREND_CONTINUATION":
+        entry_price = close
+        entry_zone_low = round(close * 0.99, 2)
+        entry_zone_high = round(close * 1.01, 2)
+        stop_loss = round(recent_low_5 * 0.99, 2)
+        risk = entry_price - stop_loss
+        if risk > 0:
+            tp1 = round(entry_price + risk * 1.2, 2)
+            tp2 = round(entry_price + risk * 2.0, 2)
+            rr = round((tp2 - entry_price) / risk, 2)
+            trailing_stop = round(recent_low_5, 2)
+
+        signal_action = "HOLD"
+        signal_strength = "MEDIUM"
+        position_size_pct = 8
+        confidence_score = 68
+
+    # Tín hiệu chốt lời / bán
+    if pd.notna(last["rsi"]) and float(last["rsi"]) >= 75 and pd.notna(last["distance_ma20"]) and float(last["distance_ma20"]) >= 8:
+        signal_action = "TAKE_PROFIT"
+        signal_strength = "STRONG"
+        confidence_score = 82
+        position_size_pct = 0
+
+    if (
+        pd.notna(last["ma20"])
+        and float(last["close"]) < float(last["ma20"])
+        and pd.notna(last["macd"])
+        and pd.notna(last["macd_signal"])
+        and float(last["macd"]) < float(last["macd_signal"])
+        and pd.notna(last["volume_ratio"])
+        and float(last["volume_ratio"]) >= 1.2
+    ):
+        signal_action = "SELL"
+        signal_strength = "STRONG"
+        confidence_score = 84
+        position_size_pct = 0
+
+    if stop_loss is not None and close < stop_loss:
+        signal_action = "CUT_LOSS"
+        signal_strength = "STRONG"
+        confidence_score = 90
+        position_size_pct = 0
+
+    return {
+        "setup_type": setup_type,
+        "signal_action": signal_action,
+        "signal_strength": signal_strength,
+        "entry_price": round(entry_price, 2) if entry_price is not None else None,
+        "entry_zone_low": entry_zone_low,
+        "entry_zone_high": entry_zone_high,
+        "stop_loss": stop_loss,
+        "take_profit_1": tp1,
+        "take_profit_2": tp2,
+        "trailing_stop": trailing_stop,
+        "risk_reward_ratio": rr,
+        "position_size_pct": position_size_pct,
+        "confidence_score": confidence_score,
+    }
+
+
+def build_strategy_note(last, plan):
+    action = plan["signal_action"]
+    setup = plan["setup_type"]
+
+    if action == "BUY" and setup in ["BREAKOUT_55", "BREAKOUT_20"]:
+        return (
+            f"Thiết lập breakout đang hoạt động. Có thể mua theo vùng xác nhận {plan['entry_zone_low']} - {plan['entry_zone_high']}, "
+            f"đặt cắt lỗ tại {plan['stop_loss']}, chốt lời TP1 {plan['take_profit_1']} và TP2 {plan['take_profit_2']}. "
+            f"Ưu tiên giải ngân {plan['position_size_pct']}% vốn nếu giá giữ vững trên vùng breakout."
+        )
+
+    if action == "BUY" and setup == "PULLBACK_MA20":
+        return (
+            f"Cổ phiếu đang ở trạng thái pullback về MA20. Có thể canh mua quanh vùng {plan['entry_zone_low']} - {plan['entry_zone_high']}, "
+            f"cắt lỗ tại {plan['stop_loss']}. Mục tiêu gần là {plan['take_profit_1']}, mục tiêu mở rộng {plan['take_profit_2']}."
+        )
+
+    if action == "HOLD":
+        return (
+            f"Xu hướng hiện vẫn tích cực. Ưu tiên nắm giữ, theo dõi trailing stop tại {plan['trailing_stop']} và cân nhắc gia tăng khi có nền tích lũy đẹp."
+        )
+
+    if action == "TAKE_PROFIT":
+        return (
+            "Cổ phiếu đã tăng nóng, RSI cao và độ lệch so với MA20 mở rộng. Ưu tiên chốt lời từng phần, giữ phần còn lại theo trailing stop."
+        )
+
+    if action == "SELL":
+        return (
+            "Tín hiệu suy yếu ngắn hạn đang xuất hiện khi giá đánh mất hỗ trợ gần và động lượng giảm. Ưu tiên hạ tỷ trọng để bảo toàn thành quả."
+        )
+
+    if action == "CUT_LOSS":
+        return (
+            f"Giá đã vi phạm vùng stop loss {plan['stop_loss']}. Kế hoạch phù hợp là cắt lỗ dứt khoát, không giữ vị thế trái kỷ luật."
+        )
+
+    return "Tín hiệu hiện chưa đủ đẹp để giải ngân mạnh. Ưu tiên quan sát thêm vùng nền giá và phản ứng quanh MA20."
 
 
 def upsert_system_status(cur, latest_market_ts):
@@ -273,6 +489,7 @@ def main():
                 df["macd"], df["macd_signal"], df["macd_hist"] = calc_macd(df["close"])
                 df["volume_ma20"] = df["volume"].rolling(20).mean()
                 df["volume_ratio"] = df["volume"] / df["volume_ma20"].replace(0, pd.NA)
+                df["atr"] = calc_atr(df, 14)
 
                 df["highest_20_prev"] = df["high"].rolling(20).max().shift(1)
                 df["highest_55_prev"] = df["high"].rolling(55).max().shift(1)
@@ -333,6 +550,8 @@ def main():
 
                 total_score = technical_score + momentum_score + breakout_score
                 expert_note = build_expert_note(last)
+                trade_plan = build_trade_plan(df)
+                expert_strategy_note = build_strategy_note(last, trade_plan)
 
                 cur.execute(
                     """
@@ -340,8 +559,12 @@ def main():
                     (symbol, ts, close, rsi, ma20, ma50, ma100, macd, macd_signal, macd_hist,
                      price_action, bullish_ma, bullish_macd, overbought, oversold,
                      volume_ma20, volume_ratio, breakout_20, breakout_55, distance_ma20,
-                     technical_score, momentum_score, breakout_score, total_score, expert_note)
-                    values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                     technical_score, momentum_score, breakout_score, total_score, expert_note,
+                     signal_action, signal_strength, setup_type, entry_price, entry_zone_low, entry_zone_high,
+                     stop_loss, take_profit_1, take_profit_2, trailing_stop, risk_reward_ratio,
+                     position_size_pct, confidence_score, expert_strategy_note)
+                    values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     on conflict (symbol, ts) do update set
                       close = excluded.close,
                       rsi = excluded.rsi,
@@ -365,7 +588,21 @@ def main():
                       momentum_score = excluded.momentum_score,
                       breakout_score = excluded.breakout_score,
                       total_score = excluded.total_score,
-                      expert_note = excluded.expert_note
+                      expert_note = excluded.expert_note,
+                      signal_action = excluded.signal_action,
+                      signal_strength = excluded.signal_strength,
+                      setup_type = excluded.setup_type,
+                      entry_price = excluded.entry_price,
+                      entry_zone_low = excluded.entry_zone_low,
+                      entry_zone_high = excluded.entry_zone_high,
+                      stop_loss = excluded.stop_loss,
+                      take_profit_1 = excluded.take_profit_1,
+                      take_profit_2 = excluded.take_profit_2,
+                      trailing_stop = excluded.trailing_stop,
+                      risk_reward_ratio = excluded.risk_reward_ratio,
+                      position_size_pct = excluded.position_size_pct,
+                      confidence_score = excluded.confidence_score,
+                      expert_strategy_note = excluded.expert_strategy_note
                     """,
                     (
                         symbol,
@@ -393,6 +630,20 @@ def main():
                         float(breakout_score),
                         float(total_score),
                         expert_note,
+                        trade_plan["signal_action"],
+                        trade_plan["signal_strength"],
+                        trade_plan["setup_type"],
+                        trade_plan["entry_price"],
+                        trade_plan["entry_zone_low"],
+                        trade_plan["entry_zone_high"],
+                        trade_plan["stop_loss"],
+                        trade_plan["take_profit_1"],
+                        trade_plan["take_profit_2"],
+                        trade_plan["trailing_stop"],
+                        trade_plan["risk_reward_ratio"],
+                        trade_plan["position_size_pct"],
+                        trade_plan["confidence_score"],
+                        expert_strategy_note,
                     ),
                 )
 
@@ -402,7 +653,7 @@ def main():
 
                 conn.commit()
                 success_count += 1
-                log(f"OK {symbol} | ghi stock_signals thành công")
+                log(f"OK {symbol} | action={trade_plan['signal_action']} | score={total_score}")
 
             except Exception as e:
                 conn.rollback()
