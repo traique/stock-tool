@@ -1,4 +1,6 @@
-psycopg2-binary
 pandas
-numpy
+psycopg2-binary
 vnstock
+requests
+beautifulsoup4
+lxml
