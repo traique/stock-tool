@@ -2,7 +2,6 @@ import os
 import re
 from datetime import datetime, timezone
 
-import pandas as pd
 import psycopg2
 import requests
 from bs4 import BeautifulSoup
@@ -17,28 +16,6 @@ def log(message):
     print(f"[{datetime.utcnow().isoformat()}Z] {message}", flush=True)
 
 
-def parse_number(value):
-    if value is None:
-        return None
-
-    text = str(value).strip()
-    if not text:
-        return None
-
-    text = text.replace("\xa0", " ").replace(" ", "")
-    text = text.replace(",", "")
-    text = text.replace(".", "")
-
-    digits = re.sub(r"[^\d]", "", text)
-    if not digits:
-        return None
-
-    try:
-        return float(digits)
-    except Exception:
-        return None
-
-
 def fetch_html(url):
     headers = {
         "User-Agent": "Mozilla/5.0 (compatible; StockDashboardBot/1.0)",
@@ -49,25 +26,31 @@ def fetch_html(url):
     return res.text
 
 
+def parse_number(value):
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    text = text.replace("\xa0", " ").replace(" ", "")
+    digits = re.sub(r"[^\d]", "", text)
+    if not digits:
+        return None
+    return float(digits)
+
+
 def scrape_sjc():
     html = fetch_html(SJC_URL)
-    soup = BeautifulSoup(html, "html.parser")
+    soup = BeautifulSoup(html, "lxml")
     text = soup.get_text("\n", strip=True)
 
+    # ví dụ hiện tại:
+    # Vàng SJC 1L, 10L, 1KG, 168,600,000, 171,600,000
+    pattern = re.compile(r"([^\n]+?),\s*([\d\.,]+)\s*,\s*([\d\.,]+)")
+    now_utc = datetime.now(timezone.utc)
+
     rows = []
-    lines = [line.strip() for line in text.splitlines() if line.strip()]
-
-    current_time = datetime.now(timezone.utc)
-
-    # Bắt các dòng kiểu:
-    # Vàng SJC 1L, 10L, 1KG, 169,800,000, 172,800,000
-    pattern = re.compile(r"^(.*?),\s*([\d\.,]+)\s*,\s*([\d\.,]+)$")
-
-    for line in lines:
-        m = pattern.match(line)
-        if not m:
-            continue
-
+    for m in pattern.finditer(text):
         gold_type = m.group(1).strip()
         buy_price = parse_number(m.group(2))
         sell_price = parse_number(m.group(3))
@@ -75,74 +58,77 @@ def scrape_sjc():
         if not gold_type or buy_price is None or sell_price is None:
             continue
 
+        # lọc bớt rác
+        lower_name = gold_type.lower()
+        if "vàng" not in lower_name and "nữ trang" not in lower_name and "sjc" not in lower_name:
+            continue
+
         rows.append(
             {
                 "source": "SJC",
-                "gold_type": gold_type,
+                "gold_type": gold_type[:200],
                 "buy_price": buy_price,
                 "sell_price": sell_price,
-                "price_time": current_time,
+                "price_time": now_utc,
             }
         )
 
-    return rows
+    # loại trùng theo source + gold_type
+    dedup = {}
+    for row in rows:
+        dedup[(row["source"], row["gold_type"])] = row
+
+    return list(dedup.values())
 
 
 def scrape_doji():
     html = fetch_html(DOJI_URL)
-    soup = BeautifulSoup(html, "html.parser")
+    soup = BeautifulSoup(html, "lxml")
     text = soup.get_text("\n", strip=True)
 
-    rows = []
-    lines = [line.strip() for line in text.splitlines() if line.strip()]
-    current_time = datetime.now(timezone.utc)
-
-    # Dữ liệu DOJI thường đi theo 3 dòng:
-    # Tên loại
-    # Mua
-    # Bán
-    #
-    # Ví dụ trang hiện có các dòng như:
+    # ví dụ hiện tại:
     # SJC -Bán Lẻ(nghìn/chỉ)
     # 16,980
     # 17,280
-    #
-    # Mình parse theo block.
+    lines = [x.strip() for x in text.splitlines() if x.strip()]
+    now_utc = datetime.now(timezone.utc)
+
+    rows = []
     i = 0
     while i < len(lines) - 2:
         name = lines[i]
-        buy = lines[i + 1]
-        sell = lines[i + 2]
+        buy = parse_number(lines[i + 1])
+        sell = parse_number(lines[i + 2])
 
-        buy_num = parse_number(buy)
-        sell_num = parse_number(sell)
+        if buy is not None and sell is not None:
+            lower_name = name.lower()
+            if any(k in lower_name for k in ["sjc", "nhẫn", "nữ trang", "nguyên liệu", "kim tt"]):
+                # DOJI đang hiển thị nghìn/chỉ -> đổi sang VND/lượng
+                buy_price = buy * 1000 * 10
+                sell_price = sell * 1000 * 10
 
-        # DOJI đang hiển thị nghìn/chỉ -> đổi sang VND/lượng để dễ so sánh hơn
-        # 1 chỉ = 1/10 lượng, nên:
-        # nghìn/chỉ * 1000 * 10 = VND/lượng
-        if buy_num is not None and sell_num is not None and len(name) > 2:
-            buy_price = buy_num * 1000 * 10
-            sell_price = sell_num * 1000 * 10
+                rows.append(
+                    {
+                        "source": "DOJI",
+                        "gold_type": name[:200],
+                        "buy_price": buy_price,
+                        "sell_price": sell_price,
+                        "price_time": now_utc,
+                    }
+                )
+                i += 3
+                continue
+        i += 1
 
-            rows.append(
-                {
-                    "source": "DOJI",
-                    "gold_type": name,
-                    "buy_price": buy_price,
-                    "sell_price": sell_price,
-                    "price_time": current_time,
-                }
-            )
-            i += 3
-        else:
-            i += 1
+    dedup = {}
+    for row in rows:
+        dedup[(row["source"], row["gold_type"])] = row
 
-    return rows
+    return list(dedup.values())
 
 
-def upsert_gold_rows(cur, rows):
+def insert_rows(cur, rows):
     inserted = 0
-
     for row in rows:
         cur.execute(
             """
@@ -158,12 +144,10 @@ def upsert_gold_rows(cur, rows):
             ),
         )
         inserted += 1
-
     return inserted
 
 
-def trim_gold_rows(cur):
-    # giữ 30 bản ghi mới nhất cho mỗi source + gold_type
+def trim_rows(cur):
     cur.execute(
         """
         delete from gold_prices
@@ -176,43 +160,45 @@ def trim_gold_rows(cur):
                    ) as rn
             from gold_prices
           ) t
-          where t.rn <= 30
+          where rn <= 30
         )
         """
     )
 
 
 def main():
-    log("Bắt đầu update gold")
+    log("Start update_gold")
 
     conn = psycopg2.connect(DB_URL)
     cur = conn.cursor()
 
-    total_rows = 0
+    total_inserted = 0
+    source_success = 0
 
     try:
-        try:
-            sjc_rows = scrape_sjc()
-            total_rows += upsert_gold_rows(cur, sjc_rows)
-            conn.commit()
-            log(f"SJC: ghi {len(sjc_rows)} dòng")
-        except Exception as e:
-            conn.rollback()
-            log(f"SJC FAIL | {e}")
+        for source_name, scraper in [("SJC", scrape_sjc), ("DOJI", scrape_doji)]:
+            try:
+                rows = scraper()
+                log(f"{source_name}: parsed {len(rows)} rows")
 
-        try:
-            doji_rows = scrape_doji()
-            total_rows += upsert_gold_rows(cur, doji_rows)
-            conn.commit()
-            log(f"DOJI: ghi {len(doji_rows)} dòng")
-        except Exception as e:
-            conn.rollback()
-            log(f"DOJI FAIL | {e}")
+                if len(rows) == 0:
+                    raise RuntimeError(f"{source_name}: parse ra 0 dòng")
 
-        trim_gold_rows(cur)
+                inserted = insert_rows(cur, rows)
+                conn.commit()
+                total_inserted += inserted
+                source_success += 1
+                log(f"{source_name}: inserted {inserted}")
+            except Exception as e:
+                conn.rollback()
+                log(f"{source_name} FAIL | {e}")
+
+        if source_success == 0 or total_inserted == 0:
+            raise RuntimeError("update_gold thất bại: không ghi được dòng nào")
+
+        trim_rows(cur)
         conn.commit()
-
-        log(f"Hoàn tất update gold | total_rows={total_rows}")
+        log(f"Done update_gold | total_inserted={total_inserted}")
 
     finally:
         cur.close()
