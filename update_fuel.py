@@ -29,21 +29,15 @@ def fetch_html(url):
 def parse_number(text):
     if text is None:
         return None
-
     value = str(text).strip().replace("\xa0", " ").replace(" ", "")
     digits = re.sub(r"[^\d]", "", value)
     if not digits:
         return None
-
-    try:
-        return float(digits)
-    except Exception:
-        return None
+    return float(digits)
 
 
 def normalize_fuel_name(name):
     text = str(name).strip()
-
     mapping = {
         "Xăng RON 95-V": "RON95-V",
         "Xăng RON 95-III": "RON95-III",
@@ -55,7 +49,6 @@ def normalize_fuel_name(name):
         "Mazút 2B (3,5S)": "Mazut 2B (3.5S)",
         "Mazút 180cst 0,5S (RMG)": "Mazut 180cst 0.5S (RMG)",
     }
-
     return mapping.get(text, text)
 
 
@@ -65,7 +58,6 @@ def parse_effective_time():
         soup = BeautifulSoup(html, "lxml")
         text = soup.get_text("\n", strip=True)
 
-        # ví dụ: 15 giờ 00 phút ngày 27.3.2026
         m = re.search(
             r"(\d{1,2})\s*giờ\s*(\d{2})\s*phút\s*ngày\s*(\d{1,2})\.(\d{1,2})\.(\d{4})",
             text,
@@ -85,10 +77,26 @@ def parse_effective_time():
         return datetime.now(timezone.utc)
 
 
+def build_pattern(product):
+    # Chấp nhận:
+    # Xăng RON 95-V · 24.730, 25.220
+    # Xăng RON 95-III, 24.330, 24.810
+    # Xăng RON 95-V : 24.730 25.220
+    return re.compile(
+        rf"{re.escape(product)}"
+        rf"(?:\s*[·,:;-]?\s*|\s+)"
+        rf"([\d][\d\.,]*)"
+        rf"(?:\s*,\s*|\s+)"
+        rf"([\d][\d\.,]*)",
+        flags=re.IGNORECASE,
+    )
+
+
 def scrape_fuel():
     html = fetch_html(PETROLIMEX_HANOI_URL)
     soup = BeautifulSoup(html, "lxml")
     text = soup.get_text(" ", strip=True)
+    text = re.sub(r"\s+", " ", text)
 
     effective_time = parse_effective_time()
 
@@ -107,21 +115,16 @@ def scrape_fuel():
     rows = []
 
     for product in product_names:
-        # ví dụ match:
-        # Xăng RON 95-V · 24.730, 25.220
-        # Xăng RON 95-III, 24.330, 24.810
-        # DO 0,001S-V ... 20.680, 21.090
-        pattern = re.compile(
-            rf"{re.escape(product)}\s*[·,:-]?\s*([\d\.,]+)\s*,\s*([\d\.,]+)",
-            flags=re.IGNORECASE,
-        )
-
+        pattern = build_pattern(product)
         m = pattern.search(text)
         if not m:
+            log(f"MISS {product}")
             continue
 
         region_1 = parse_number(m.group(1))
         region_2 = parse_number(m.group(2))
+
+        log(f"MATCH {product} | raw1={m.group(1)} raw2={m.group(2)}")
 
         if region_1 is None:
             continue
@@ -137,7 +140,6 @@ def scrape_fuel():
             }
         )
 
-    # dedup
     dedup = {}
     for row in rows:
         dedup[row["fuel_type"]] = row
