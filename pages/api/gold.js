@@ -20,15 +20,21 @@ export default async function handler(req, res) {
       return res.status(500).json({ error: error.message });
     }
 
+    const wanted = ["sjc_hcm", "ring_9999_hcm", "world_xauusd"];
     const latestMap = new Map();
+
     for (const row of data || []) {
-      const key = `${row.source}-${row.gold_type}`;
-      if (!latestMap.has(key)) {
-        latestMap.set(key, row);
+      if (!wanted.includes(row.gold_type)) continue;
+      if (!latestMap.has(row.gold_type)) {
+        latestMap.set(row.gold_type, row);
       }
     }
 
-    return res.status(200).json(Array.from(latestMap.values()));
+    const ordered = wanted
+      .map((key) => latestMap.get(key))
+      .filter(Boolean);
+
+    return res.status(200).json(ordered);
   } catch (err) {
     return res.status(500).json({ error: err.message || "Unknown server error" });
   }
