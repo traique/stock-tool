@@ -12,13 +12,13 @@ SJC_URL = "https://giavang.org/trong-nuoc/sjc/"
 WORLD_URL = "https://giavang.org/the-gioi/"
 
 
-def log(message):
+def log(message: str) -> None:
     print(f"[{datetime.utcnow().isoformat()}Z] {message}", flush=True)
 
 
-def fetch_html(url):
+def fetch_html(url: str) -> str:
     headers = {
-        "User-Agent": "Mozilla/5.0 (compatible; StockDashboardBot/1.0)",
+        "User-Agent": "Mozilla/5.0 (compatible; AlphaPulseEliteBot/1.0)",
         "Accept-Language": "vi-VN,vi;q=0.9,en;q=0.8",
         "Cache-Control": "no-cache",
         "Pragma": "no-cache",
@@ -28,44 +28,46 @@ def fetch_html(url):
     return res.text
 
 
-def parse_domestic_gold_million(value):
+def parse_domestic_gold_to_vnd_per_luong(value):
     """
-    Giá vàng trong nước từ nguồn thường có dạng:
-    - 169.8
-    - 169,8
-    - 169.800
-    - 169,800
+    Chuẩn hóa giá vàng trong nước về VND/lượng.
 
-    Mục tiêu lưu DB theo VND/lượng:
-    169.8  -> 169800000
-    169.800 -> 169800000
+    Các kiểu dữ liệu nguồn hay gặp:
+    - 170.8
+    - 170,8
+    - 170.800
+    - 170,800
+    - 170800000
+
+    Kết quả mong muốn:
+    - 170.8     -> 170800000
+    - 170.800   -> 170800000
+    - 170800000 -> 170800000
     """
     if value is None:
         return None
 
-    text = str(value).strip().replace("\xa0", " ").replace(" ", "")
-    text = text.replace(",", ".")
+    raw = str(value).strip().replace("\xa0", " ").replace(" ", "")
+    raw = raw.replace(",", ".")
 
-    if not text:
+    if not raw:
         return None
 
-    if not re.fullmatch(r"\d+(?:\.\d+)?", text):
+    if not re.fullmatch(r"\d+(?:\.\d+)?", raw):
         return None
 
-    number = float(text)
+    number = float(raw)
 
-    # Trường hợp site trả 169.800 hoặc 170.600
-    # Nếu số đang lớn hơn 1000 nhưng nhỏ hơn 1 triệu,
-    # coi như giá theo "nghìn" và nhân thêm 1000
+    # Đã là VND/lượng
+    if number >= 100_000_000:
+        return int(round(number))
+
+    # Dạng 170.800 => hiểu là 170,800 triệu => 170,800,000
     if 1000 <= number < 1_000_000:
-        number = number * 1000
+        return int(round(number * 1000))
 
-    # Nếu site trả 169.8 hoặc 170.6
-    # coi là triệu đồng/lượng
-    if number < 1000:
-        number = number * 1_000_000
-
-    return float(round(number, 2))
+    # Dạng 170.8 => hiểu là 170.8 triệu => 170,800,000
+    return int(round(number * 1_000_000))
 
 
 def parse_world_price(value):
@@ -93,28 +95,38 @@ def get_previous_row(cur, source, gold_type):
 
 
 def is_valid_row(row):
-    if row["buy_price"] is None or row["sell_price"] is None:
+    buy_price = row.get("buy_price")
+    sell_price = row.get("sell_price")
+    gold_type = row.get("gold_type")
+
+    if buy_price is None or sell_price is None:
         return False
 
-    if row["gold_type"] in ("sjc_hcm", "ring_9999_hcm"):
-        # vàng trong nước phải ở cỡ hàng trăm triệu VND/lượng
-        if row["buy_price"] < 100_000_000 or row["sell_price"] < 100_000_000:
+    if gold_type in ("sjc_hcm", "ring_9999_hcm"):
+        # vàng trong nước phải quanh hàng trăm triệu VND/lượng
+        if buy_price < 100_000_000 or sell_price < 100_000_000:
             return False
 
-    if row["gold_type"] == "world_xauusd":
-        # vàng thế giới phải ở cỡ vài nghìn USD/ounce
-        if row["buy_price"] < 1000 or row["sell_price"] < 1000:
+    if gold_type == "world_xauusd":
+        # vàng thế giới phải cỡ vài nghìn USD
+        if buy_price < 1000 or sell_price < 1000:
             return False
 
     return True
 
 
 def cleanup_bad_rows(cur):
+    """
+    Xóa các dòng test cũ bị sai đơn vị để tránh UI lấy nhầm.
+    """
     cur.execute(
         """
         delete from gold_prices
         where unit = 'VND/lượng'
-          and (buy_price < 100000000 or sell_price < 100000000)
+          and (
+            buy_price < 100000000
+            or sell_price < 100000000
+          )
         """
     )
 
@@ -125,8 +137,29 @@ def insert_gold_row(cur, row):
     prev_buy = float(prev[0]) if prev and prev[0] is not None else None
     prev_sell = float(prev[1]) if prev and prev[1] is not None else None
 
-    change_buy = None if prev_buy is None or row["buy_price"] is None else row["buy_price"] - prev_buy
-    change_sell = None if prev_sell is None or row["sell_price"] is None else row["sell_price"] - prev_sell
+    if row["gold_type"] in ("sjc_hcm", "ring_9999_hcm"):
+        current_buy = int(row["buy_price"])
+        current_sell = int(row["sell_price"])
+
+        change_buy = None if prev_buy is None else current_buy - int(prev_buy)
+        change_sell = None if prev_sell is None else current_sell - int(prev_sell)
+
+        # triệt tiêu sai số lẻ nhỏ
+        if change_buy is not None and abs(change_buy) < 1000:
+            change_buy = 0
+        if change_sell is not None and abs(change_sell) < 1000:
+            change_sell = 0
+    else:
+        current_buy = float(row["buy_price"])
+        current_sell = float(row["sell_price"])
+
+        change_buy = None if prev_buy is None else current_buy - prev_buy
+        change_sell = None if prev_sell is None else current_sell - prev_sell
+
+        if change_buy is not None and abs(change_buy) < 0.01:
+            change_buy = 0
+        if change_sell is not None and abs(change_sell) < 0.01:
+            change_sell = 0
 
     cur.execute(
         """
@@ -141,8 +174,8 @@ def insert_gold_row(cur, row):
             row["gold_type"],
             row["display_name"],
             row["subtitle"],
-            row["buy_price"],
-            row["sell_price"],
+            current_buy,
+            current_sell,
             row["unit"],
             change_buy,
             change_sell,
@@ -178,43 +211,39 @@ def scrape_sjc_and_ring():
 
     rows = []
 
-    m_sjc = re.search(
+    sjc_match = re.search(
         r"Hồ Chí Minh\s+Vàng SJC 1L, 10L, 1KG\s+([\d\.,]+)\s+([\d\.,]+)",
         text,
         flags=re.IGNORECASE,
     )
-    if m_sjc:
-        buy_price = parse_domestic_gold_million(m_sjc.group(1))
-        sell_price = parse_domestic_gold_million(m_sjc.group(2))
+    if sjc_match:
         rows.append(
             {
                 "source": "giavang.org",
                 "gold_type": "sjc_hcm",
                 "display_name": "Vàng miếng SJC",
                 "subtitle": "SJC - Hồ Chí Minh",
-                "buy_price": buy_price,
-                "sell_price": sell_price,
+                "buy_price": parse_domestic_gold_to_vnd_per_luong(sjc_match.group(1)),
+                "sell_price": parse_domestic_gold_to_vnd_per_luong(sjc_match.group(2)),
                 "unit": "VND/lượng",
                 "price_time": now_utc,
             }
         )
 
-    m_ring = re.search(
+    ring_match = re.search(
         r"Hồ Chí Minh\s+.*?Vàng nhẫn SJC 99,99% 1 chỉ, 2 chỉ, 5 chỉ\s+([\d\.,]+)\s+([\d\.,]+)",
         text,
         flags=re.IGNORECASE | re.DOTALL,
     )
-    if m_ring:
-        buy_price = parse_domestic_gold_million(m_ring.group(1))
-        sell_price = parse_domestic_gold_million(m_ring.group(2))
+    if ring_match:
         rows.append(
             {
                 "source": "giavang.org",
                 "gold_type": "ring_9999_hcm",
                 "display_name": "Vàng nhẫn 9999",
                 "subtitle": "SJC - Hồ Chí Minh",
-                "buy_price": buy_price,
-                "sell_price": sell_price,
+                "buy_price": parse_domestic_gold_to_vnd_per_luong(ring_match.group(1)),
+                "sell_price": parse_domestic_gold_to_vnd_per_luong(ring_match.group(2)),
                 "unit": "VND/lượng",
                 "price_time": now_utc,
             }
@@ -244,16 +273,18 @@ def scrape_world_gold():
     if price is None:
         return None
 
-    prev_delta = None
+    forced_delta = None
     up_match = re.search(r"tăng\s*([-\d,\.]+)\s*USD", text, flags=re.IGNORECASE)
     down_match = re.search(r"giảm\s*([-\d,\.]+)\s*USD", text, flags=re.IGNORECASE)
 
     if up_match:
         delta_val = parse_world_price(up_match.group(1))
-        prev_delta = abs(delta_val) if delta_val is not None else None
+        if delta_val is not None:
+            forced_delta = abs(delta_val)
     elif down_match:
         delta_val = parse_world_price(down_match.group(1))
-        prev_delta = -abs(delta_val) if delta_val is not None else None
+        if delta_val is not None:
+            forced_delta = -abs(delta_val)
 
     return {
         "source": "giavang.org",
@@ -264,8 +295,41 @@ def scrape_world_gold():
         "sell_price": price,
         "unit": "USD/ounce",
         "price_time": now_utc,
-        "forced_delta": prev_delta,
+        "forced_delta": forced_delta,
     }
+
+
+def insert_world_gold(cur, row):
+    delta = row.get("forced_delta")
+
+    if delta is None:
+        insert_gold_row(cur, row)
+        return
+
+    if abs(delta) < 0.01:
+        delta = 0
+
+    cur.execute(
+        """
+        insert into gold_prices (
+          source, gold_type, display_name, subtitle, buy_price, sell_price,
+          unit, change_buy, change_sell, price_time, created_at
+        )
+        values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now())
+        """,
+        (
+            row["source"],
+            row["gold_type"],
+            row["display_name"],
+            row["subtitle"],
+            float(row["buy_price"]),
+            float(row["sell_price"]),
+            row["unit"],
+            float(delta),
+            float(delta),
+            row["price_time"],
+        ),
+    )
 
 
 def main():
@@ -278,9 +342,9 @@ def main():
         cleanup_bad_rows(cur)
 
         rows = scrape_sjc_and_ring()
-        world = scrape_world_gold()
-        if world:
-            rows.append(world)
+        world_row = scrape_world_gold()
+        if world_row:
+            rows.append(world_row)
 
         valid_rows = [row for row in rows if is_valid_row(row)]
         log(f"Gold parsed {len(rows)} rows | valid {len(valid_rows)} rows")
@@ -289,28 +353,8 @@ def main():
             raise RuntimeError("update_gold parse ra 0 dòng hợp lệ")
 
         for row in valid_rows:
-            if row["gold_type"] == "world_xauusd" and row.get("forced_delta") is not None:
-                cur.execute(
-                    """
-                    insert into gold_prices (
-                      source, gold_type, display_name, subtitle, buy_price, sell_price,
-                      unit, change_buy, change_sell, price_time, created_at
-                    )
-                    values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now())
-                    """,
-                    (
-                        row["source"],
-                        row["gold_type"],
-                        row["display_name"],
-                        row["subtitle"],
-                        row["buy_price"],
-                        row["sell_price"],
-                        row["unit"],
-                        row["forced_delta"],
-                        row["forced_delta"],
-                        row["price_time"],
-                    ),
-                )
+            if row["gold_type"] == "world_xauusd":
+                insert_world_gold(cur, row)
             else:
                 insert_gold_row(cur, row)
 
