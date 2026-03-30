@@ -7,30 +7,28 @@ export default async function handler(req, res) {
       process.env.SUPABASE_SERVICE_ROLE_KEY
     );
 
-    const { data, error } = await supabase.rpc("version");
-    const { count: goldCount, error: goldError } = await supabase
+    const { data, error } = await supabase
       .from("gold_prices")
-      .select("*", { count: "exact", head: true });
+      .select("*")
+      .order("price_time", { ascending: false })
+      .order("id", { ascending: false });
 
-    const { count: fuelCount, error: fuelError } = await supabase
-      .from("fuel_prices")
-      .select("*", { count: "exact", head: true });
+    if (error) {
+      return res.status(500).json({ error: error.message });
+    }
 
-    const { count: stockCount, error: stockError } = await supabase
-      .from("stock_signals")
-      .select("*", { count: "exact", head: true });
+    const wanted = ["sjc_hcm", "ring_9999_hcm", "world_xauusd"];
+    const latestMap = new Map();
 
-    return res.status(200).json({
-      url: process.env.NEXT_PUBLIC_SUPABASE_URL,
-      goldCount,
-      fuelCount,
-      stockCount,
-      goldError: goldError?.message || null,
-      fuelError: fuelError?.message || null,
-      stockError: stockError?.message || null,
-      versionData: data || null,
-      now: new Date().toISOString(),
-    });
+    for (const row of data || []) {
+      if (wanted.includes(row.gold_type) && !latestMap.has(row.gold_type)) {
+        latestMap.set(row.gold_type, row);
+      }
+    }
+
+    const items = wanted.map((key) => latestMap.get(key)).filter(Boolean);
+
+    return res.status(200).json(items);
   } catch (err) {
     return res.status(500).json({
       error: err.message || "Unknown server error",
