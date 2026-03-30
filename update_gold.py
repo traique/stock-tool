@@ -8,8 +8,8 @@ from bs4 import BeautifulSoup
 
 DB_URL = os.environ["DB_URL"]
 
-SJC_URL = "https://sjc.com.vn/gia-vang-online"
-DOJI_URL = "https://giavang.doji.vn/"
+SJC_URL = "https://giavang.org/trong-nuoc/sjc/"
+WORLD_URL = "https://giavang.org/the-gioi/"
 
 
 def log(message):
@@ -29,125 +29,76 @@ def fetch_html(url):
 def parse_number(value):
     if value is None:
         return None
-    text = str(value).strip()
-    if not text:
-        return None
-    text = text.replace("\xa0", " ").replace(" ", "")
+    text = str(value).strip().replace("\xa0", " ").replace(" ", "")
+    text = text.replace(",", ".")
+    # trường hợp kiểu 169.800 hoặc 4,448.81
+    if re.fullmatch(r"\d{1,3}(?:\.\d{3})+", text):
+        return float(text.replace(".", ""))
+    # kiểu world gold: 4,448.81 -> 4448.81
+    text = text.replace(".", "")
     digits = re.sub(r"[^\d]", "", text)
     if not digits:
         return None
     return float(digits)
 
 
-def scrape_sjc():
-    html = fetch_html(SJC_URL)
-    soup = BeautifulSoup(html, "lxml")
-    text = soup.get_text("\n", strip=True)
+def parse_world_price(value):
+    if value is None:
+        return None
+    text = str(value).strip().replace(",", "")
+    m = re.search(r"(\d+(?:\.\d+)?)", text)
+    if not m:
+        return None
+    return float(m.group(1))
 
-    # ví dụ hiện tại:
-    # Vàng SJC 1L, 10L, 1KG, 168,600,000, 171,600,000
-    pattern = re.compile(r"([^\n]+?),\s*([\d\.,]+)\s*,\s*([\d\.,]+)")
-    now_utc = datetime.now(timezone.utc)
 
-    rows = []
-    for m in pattern.finditer(text):
-        gold_type = m.group(1).strip()
-        buy_price = parse_number(m.group(2))
-        sell_price = parse_number(m.group(3))
+def get_previous_row(cur, source, gold_type):
+    cur.execute(
+        """
+        select buy_price, sell_price
+        from gold_prices
+        where source = %s and gold_type = %s
+        order by price_time desc, id desc
+        limit 1
+        """,
+        (source, gold_type),
+    )
+    return cur.fetchone()
 
-        if not gold_type or buy_price is None or sell_price is None:
-            continue
 
-        # lọc bớt rác
-        lower_name = gold_type.lower()
-        if "vàng" not in lower_name and "nữ trang" not in lower_name and "sjc" not in lower_name:
-            continue
+def insert_gold_row(cur, row):
+    prev = get_previous_row(cur, row["source"], row["gold_type"])
 
-        rows.append(
-            {
-                "source": "SJC",
-                "gold_type": gold_type[:200],
-                "buy_price": buy_price,
-                "sell_price": sell_price,
-                "price_time": now_utc,
-            }
+    prev_buy = float(prev[0]) if prev and prev[0] is not None else None
+    prev_sell = float(prev[1]) if prev and prev[1] is not None else None
+
+    change_buy = None if prev_buy is None or row["buy_price"] is None else row["buy_price"] - prev_buy
+    change_sell = None if prev_sell is None or row["sell_price"] is None else row["sell_price"] - prev_sell
+
+    cur.execute(
+        """
+        insert into gold_prices (
+          source, gold_type, display_name, subtitle, buy_price, sell_price,
+          unit, change_buy, change_sell, price_time, created_at
         )
-
-    # loại trùng theo source + gold_type
-    dedup = {}
-    for row in rows:
-        dedup[(row["source"], row["gold_type"])] = row
-
-    return list(dedup.values())
-
-
-def scrape_doji():
-    html = fetch_html(DOJI_URL)
-    soup = BeautifulSoup(html, "lxml")
-    text = soup.get_text("\n", strip=True)
-
-    # ví dụ hiện tại:
-    # SJC -Bán Lẻ(nghìn/chỉ)
-    # 16,980
-    # 17,280
-    lines = [x.strip() for x in text.splitlines() if x.strip()]
-    now_utc = datetime.now(timezone.utc)
-
-    rows = []
-    i = 0
-    while i < len(lines) - 2:
-        name = lines[i]
-        buy = parse_number(lines[i + 1])
-        sell = parse_number(lines[i + 2])
-
-        if buy is not None and sell is not None:
-            lower_name = name.lower()
-            if any(k in lower_name for k in ["sjc", "nhẫn", "nữ trang", "nguyên liệu", "kim tt"]):
-                # DOJI đang hiển thị nghìn/chỉ -> đổi sang VND/lượng
-                buy_price = buy * 1000 * 10
-                sell_price = sell * 1000 * 10
-
-                rows.append(
-                    {
-                        "source": "DOJI",
-                        "gold_type": name[:200],
-                        "buy_price": buy_price,
-                        "sell_price": sell_price,
-                        "price_time": now_utc,
-                    }
-                )
-                i += 3
-                continue
-        i += 1
-
-    dedup = {}
-    for row in rows:
-        dedup[(row["source"], row["gold_type"])] = row
-
-    return list(dedup.values())
+        values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now())
+        """,
+        (
+            row["source"],
+            row["gold_type"],
+            row["display_name"],
+            row["subtitle"],
+            row["buy_price"],
+            row["sell_price"],
+            row["unit"],
+            change_buy,
+            change_sell,
+            row["price_time"],
+        ),
+    )
 
 
-def insert_rows(cur, rows):
-    inserted = 0
-    for row in rows:
-        cur.execute(
-            """
-            insert into gold_prices (source, gold_type, buy_price, sell_price, price_time, created_at)
-            values (%s, %s, %s, %s, %s, now())
-            """,
-            (
-                row["source"],
-                row["gold_type"],
-                row["buy_price"],
-                row["sell_price"],
-                row["price_time"],
-            ),
-        )
-        inserted += 1
-    return inserted
-
-
-def trim_rows(cur):
+def trim_gold_rows(cur):
     cur.execute(
         """
         delete from gold_prices
@@ -166,39 +117,141 @@ def trim_rows(cur):
     )
 
 
+def scrape_sjc_and_ring():
+    html = fetch_html(SJC_URL)
+    soup = BeautifulSoup(html, "lxml")
+    text = soup.get_text("\n", strip=True)
+    now_utc = datetime.now(timezone.utc)
+
+    rows = []
+
+    # Vàng miếng SJC Hồ Chí Minh
+    m_sjc = re.search(
+        r"Hồ Chí Minh\s+Vàng SJC 1L, 10L, 1KG\s+([\d\.,]+)\s+([\d\.,]+)",
+        text,
+        flags=re.IGNORECASE,
+    )
+    if m_sjc:
+        rows.append(
+            {
+                "source": "giavang.org",
+                "gold_type": "sjc_hcm",
+                "display_name": "Vàng miếng SJC",
+                "subtitle": "SJC - Hồ Chí Minh",
+                "buy_price": parse_number(m_sjc.group(1)),
+                "sell_price": parse_number(m_sjc.group(2)),
+                "unit": "VND/lượng",
+                "price_time": now_utc,
+            }
+        )
+
+    # Vàng nhẫn 9999 Hồ Chí Minh
+    m_ring = re.search(
+        r"Hồ Chí Minh\s+.*?Vàng nhẫn SJC 99,99% 1 chỉ, 2 chỉ, 5 chỉ\s+([\d\.,]+)\s+([\d\.,]+)",
+        text,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    if m_ring:
+        rows.append(
+            {
+                "source": "giavang.org",
+                "gold_type": "ring_9999_hcm",
+                "display_name": "Vàng nhẫn 9999",
+                "subtitle": "SJC - Hồ Chí Minh",
+                "buy_price": parse_number(m_ring.group(1)),
+                "sell_price": parse_number(m_ring.group(2)),
+                "unit": "VND/lượng",
+                "price_time": now_utc,
+            }
+        )
+
+    return rows
+
+
+def scrape_world_gold():
+    html = fetch_html(WORLD_URL)
+    soup = BeautifulSoup(html, "lxml")
+    text = soup.get_text("\n", strip=True)
+    now_utc = datetime.now(timezone.utc)
+
+    price_match = re.search(r"Giá vàng quốc tế.*?là\s*([\d,]+\.\d+)\s*USD", text, flags=re.IGNORECASE)
+    change_match = re.search(r"giảm\s*([-\d,\.]+)\s*USD", text, flags=re.IGNORECASE)
+
+    if not price_match:
+        # fallback match
+        price_match = re.search(r"([\d,]+\.\d+)\s*USD", text)
+
+    if not price_match:
+        return None
+
+    price = parse_world_price(price_match.group(1))
+    delta = None
+    if change_match:
+        delta = -abs(parse_world_price(change_match.group(1)))
+
+    return {
+        "source": "giavang.org",
+        "gold_type": "world_xauusd",
+        "display_name": "Vàng thế giới",
+        "subtitle": "Vàng/Đô la Mỹ",
+        "buy_price": price,
+        "sell_price": price,
+        "unit": "USD/ounce",
+        "price_time": now_utc,
+        "forced_delta": delta,
+    }
+
+
 def main():
     log("Start update_gold")
 
     conn = psycopg2.connect(DB_URL)
     cur = conn.cursor()
 
-    total_inserted = 0
-    source_success = 0
-
     try:
-        for source_name, scraper in [("SJC", scrape_sjc), ("DOJI", scrape_doji)]:
-            try:
-                rows = scraper()
-                log(f"{source_name}: parsed {len(rows)} rows")
+        rows = scrape_sjc_and_ring()
+        world = scrape_world_gold()
+        if world:
+            rows.append(world)
 
-                if len(rows) == 0:
-                    raise RuntimeError(f"{source_name}: parse ra 0 dòng")
+        log(f"Gold parsed {len(rows)} rows")
 
-                inserted = insert_rows(cur, rows)
-                conn.commit()
-                total_inserted += inserted
-                source_success += 1
-                log(f"{source_name}: inserted {inserted}")
-            except Exception as e:
-                conn.rollback()
-                log(f"{source_name} FAIL | {e}")
+        if len(rows) == 0:
+            raise RuntimeError("update_gold parse ra 0 dòng")
 
-        if source_success == 0 or total_inserted == 0:
-            raise RuntimeError("update_gold thất bại: không ghi được dòng nào")
+        for row in rows:
+            if row["gold_type"] == "world_xauusd" and row.get("forced_delta") is not None:
+                prev = get_previous_row(cur, row["source"], row["gold_type"])
+                change_buy = row["forced_delta"]
+                change_sell = row["forced_delta"]
 
-        trim_rows(cur)
+                cur.execute(
+                    """
+                    insert into gold_prices (
+                      source, gold_type, display_name, subtitle, buy_price, sell_price,
+                      unit, change_buy, change_sell, price_time, created_at
+                    )
+                    values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now())
+                    """,
+                    (
+                        row["source"],
+                        row["gold_type"],
+                        row["display_name"],
+                        row["subtitle"],
+                        row["buy_price"],
+                        row["sell_price"],
+                        row["unit"],
+                        change_buy,
+                        change_sell,
+                        row["price_time"],
+                    ),
+                )
+            else:
+                insert_gold_row(cur, row)
+
+        trim_gold_rows(cur)
         conn.commit()
-        log(f"Done update_gold | total_inserted={total_inserted}")
+        log("Done update_gold")
 
     finally:
         cur.close()
