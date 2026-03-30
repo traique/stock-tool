@@ -21,7 +21,12 @@ export default async function handler(req, res) {
     const latestMap = new Map();
 
     for (const row of data || []) {
-      if (wanted.includes(row.gold_type) && !latestMap.has(row.gold_type)) {
+      if (!wanted.includes(row.gold_type)) continue;
+
+      const isValidDomestic =
+        row.unit === "VND/lượng" ? Number(row.buy_price) >= 1000000 : true;
+
+      if (isValidDomestic && !latestMap.has(row.gold_type)) {
         latestMap.set(row.gold_type, row);
       }
     }
