@@ -129,7 +129,6 @@ export default function Home() {
       try {
         const res = await fetch(`/api/job-status?id=${jobId}`);
         const data = await res.json();
-
         setJobStatus(data);
 
         if (!data) return;
@@ -166,22 +165,21 @@ export default function Home() {
       });
 
       const data = await res.json();
-      console.log("run-update response", data);
 
       if (!res.ok) {
-       setJobRunning(false);
-       setJobStatus({
-        target,
-        status: "failed",
-        progress: 100,
-        message:
-         data.github_response ||
-         data.detail ||
-         data.error ||
-        "Không gọi được workflow",
-      });
-      return;
-     }
+        setJobRunning(false);
+        setJobStatus({
+          target,
+          status: "failed",
+          progress: 100,
+          message:
+            data.github_response ||
+            data.detail ||
+            data.error ||
+            "Không gọi được workflow",
+        });
+        return;
+      }
 
       await pollJob(data.job_run_id);
     } catch {
@@ -245,57 +243,6 @@ export default function Home() {
           <TabButton active={mode === "gold"} onClick={() => setMode("gold")} label="🥇 Giá vàng" styles={styles} />
           <TabButton active={mode === "fuel"} onClick={() => setMode("fuel")} label="⛽ Giá xăng" styles={styles} />
         </div>
-
-        <div style={styles.updateActionBar}>
-          <button style={styles.updateBtn} onClick={() => runUpdate("stocks")} disabled={jobRunning}>
-            🔄 Cập nhật cổ phiếu
-          </button>
-          <button style={styles.updateBtn} onClick={() => runUpdate("gold")} disabled={jobRunning}>
-            🥇 Cập nhật vàng
-          </button>
-          <button style={styles.updateBtn} onClick={() => runUpdate("fuel")} disabled={jobRunning}>
-            ⛽ Cập nhật xăng
-          </button>
-          <button style={styles.updateBtnPrimary} onClick={() => runUpdate("all")} disabled={jobRunning}>
-            ⚡ Cập nhật tất cả
-          </button>
-        </div>
-
-        {jobStatus ? (
-          <div style={styles.progressCard}>
-            <div style={styles.progressHeader}>
-              <div style={styles.progressTitle}>
-                {jobStatus.target === "stocks"
-                  ? "Tiến trình cập nhật cổ phiếu"
-                  : jobStatus.target === "gold"
-                  ? "Tiến trình cập nhật vàng"
-                  : jobStatus.target === "fuel"
-                  ? "Tiến trình cập nhật xăng"
-                  : "Tiến trình cập nhật toàn bộ"}
-              </div>
-              <div style={styles.progressPercent}>
-                {Number(jobStatus.progress || 0)}%
-              </div>
-            </div>
-
-            <div style={styles.progressTrack}>
-              <div
-                style={{
-                  ...styles.progressBar,
-                  width: `${Number(jobStatus.progress || 0)}%`,
-                }}
-              />
-            </div>
-
-            <div style={styles.progressMessage}>
-              {jobStatus.message || "Đang xử lý..."}
-            </div>
-
-            <div style={styles.progressMeta}>
-              Trạng thái: <strong>{jobStatus.status || "queued"}</strong>
-            </div>
-          </div>
-        ) : null}
 
         {mode === "watchlist" ? (
           <section style={styles.panel}>
@@ -389,11 +336,17 @@ export default function Home() {
                   </div>
                 ))}
 
-                {goldItems[0]?.price_time ? (
-                  <div style={styles.goldFooter}>
-                    Cập nhật: {formatDateTime(goldItems[0]?.price_time)}
+                <div style={styles.goldFooter}>
+                  <div>
+                    Giá từ nguồn:{" "}
+                    {formatDateTime(goldItems[0]?.price_time) || "Chưa có dữ liệu"}
                   </div>
-                ) : null}
+                  <div>
+                    Hệ thống đồng bộ:{" "}
+                    {formatDateTime(goldItems[0]?.created_at || goldItems[0]?.price_time) ||
+                      "Chưa có dữ liệu"}
+                  </div>
+                </div>
               </div>
             </section>
           )
@@ -584,6 +537,72 @@ export default function Home() {
             })}
           </div>
         )}
+
+        <section style={styles.panel}>
+          <div style={styles.panelHeader}>
+            <div>
+              <div style={styles.panelTitle}>⚙️ Cập nhật dữ liệu</div>
+              <div style={styles.panelDesc}>
+                Chạy cập nhật thủ công cho cổ phiếu, vàng, xăng hoặc toàn bộ hệ thống.
+              </div>
+            </div>
+          </div>
+
+          <div style={styles.updateActionBar}>
+            <button style={styles.updateBtn} onClick={() => runUpdate("stocks")} disabled={jobRunning}>
+              🔄 Cập nhật cổ phiếu
+            </button>
+            <button style={styles.updateBtn} onClick={() => runUpdate("gold")} disabled={jobRunning}>
+              🥇 Cập nhật vàng
+            </button>
+            <button style={styles.updateBtn} onClick={() => runUpdate("fuel")} disabled={jobRunning}>
+              ⛽ Cập nhật xăng
+            </button>
+            <button style={styles.updateBtnPrimary} onClick={() => runUpdate("all")} disabled={jobRunning}>
+              ⚡ Cập nhật tất cả
+            </button>
+          </div>
+
+          {jobStatus ? (
+            <div style={styles.progressCard}>
+              <div style={styles.progressHeader}>
+                <div style={styles.progressTitle}>
+                  {jobStatus.target === "stocks"
+                    ? "Tiến trình cập nhật cổ phiếu"
+                    : jobStatus.target === "gold"
+                    ? "Tiến trình cập nhật vàng"
+                    : jobStatus.target === "fuel"
+                    ? "Tiến trình cập nhật xăng"
+                    : "Tiến trình cập nhật toàn bộ"}
+                </div>
+                <div style={styles.progressPercent}>
+                  {Number(jobStatus.progress || 0)}%
+                </div>
+              </div>
+
+              <div style={styles.progressTrack}>
+                <div
+                  style={{
+                    ...styles.progressBar,
+                    width: `${Number(jobStatus.progress || 0)}%`,
+                  }}
+                />
+              </div>
+
+              <div style={styles.progressMessage}>
+                {jobStatus.message || "Đang xử lý..."}
+              </div>
+
+              <div style={styles.progressMeta}>
+                Trạng thái: <strong>{jobStatus.status || "queued"}</strong>
+              </div>
+            </div>
+          ) : (
+            <div style={styles.emptyInline}>
+              Chưa có tiến trình cập nhật nào được hiển thị.
+            </div>
+          )}
+        </section>
       </div>
     </div>
   );
@@ -697,24 +716,26 @@ function formatGoldValue(value, unit) {
 function formatGoldChange(value, unit) {
   if (value == null || Number.isNaN(Number(value))) return "";
 
+  const num = Number(value);
+
+  if (Math.abs(num) < 1000 && unit === "VND/lượng") return "";
+  if (Math.abs(num) < 0.01 && unit !== "VND/lượng") return "";
+
   if (unit === "VND/lượng") {
-    const sign = Number(value) > 0 ? "+" : "-";
-    return `${sign}${(Math.abs(Number(value)) / 1_000_000).toFixed(1)}M`;
+    const sign = num > 0 ? "+" : "-";
+    return `${sign}${(Math.abs(num) / 1_000_000).toFixed(1)}M`;
   }
 
-  const sign = Number(value) > 0 ? "+" : "-";
-  return `${sign}${Math.abs(Number(value)).toLocaleString("en-US", {
+  const sign = num > 0 ? "+" : "-";
+  return `${sign}${Math.abs(num).toLocaleString("en-US", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   })}`;
 }
 
 function getGoldChangeStyle(change, styles) {
-  return change == null
-    ? styles.goldChangeNeutral
-    : Number(change) >= 0
-    ? styles.goldChangeUp
-    : styles.goldChangeDown;
+  if (change == null || Math.abs(Number(change)) < 1000) return styles.goldChangeNeutral;
+  return Number(change) >= 0 ? styles.goldChangeUp : styles.goldChangeDown;
 }
 
 function getActionStyle(action, styles) {
@@ -917,82 +938,6 @@ function createStyles(p) {
       fontWeight: 800,
       fontSize: 13,
       boxShadow: `0 12px 28px ${p.shadow}`,
-    },
-    updateActionBar: {
-      display: "flex",
-      gap: 8,
-      flexWrap: "wrap",
-      marginBottom: 12,
-    },
-    updateBtn: {
-      border: `1px solid ${p.line}`,
-      background: p.surface,
-      color: p.textStrong,
-      padding: "10px 13px",
-      borderRadius: 14,
-      fontWeight: 800,
-      cursor: "pointer",
-      fontSize: 13,
-    },
-    updateBtnPrimary: {
-      border: "none",
-      background: "linear-gradient(135deg, #2563eb, #0f172a)",
-      color: "#fff",
-      padding: "10px 13px",
-      borderRadius: 14,
-      fontWeight: 800,
-      cursor: "pointer",
-      fontSize: 13,
-      boxShadow: `0 12px 28px ${p.shadow}`,
-    },
-    progressCard: {
-      background: p.panel,
-      border: `1px solid ${p.panelBorder}`,
-      boxShadow: `0 20px 50px ${p.shadow}`,
-      borderRadius: 18,
-      padding: 14,
-      marginBottom: 14,
-    },
-    progressHeader: {
-      display: "flex",
-      justifyContent: "space-between",
-      alignItems: "center",
-      gap: 10,
-      marginBottom: 10,
-    },
-    progressTitle: {
-      fontSize: 14,
-      fontWeight: 800,
-      color: p.textStrong,
-    },
-    progressPercent: {
-      fontSize: 14,
-      fontWeight: 900,
-      color: "#2563eb",
-    },
-    progressTrack: {
-      width: "100%",
-      height: 10,
-      background: p.line,
-      borderRadius: 999,
-      overflow: "hidden",
-    },
-    progressBar: {
-      height: "100%",
-      borderRadius: 999,
-      background: "linear-gradient(90deg, #22c55e, #2563eb)",
-      transition: "width 0.35s ease",
-    },
-    progressMessage: {
-      marginTop: 10,
-      fontSize: 13,
-      color: p.textStrong,
-      fontWeight: 700,
-    },
-    progressMeta: {
-      marginTop: 6,
-      fontSize: 12,
-      color: p.textSoft,
     },
     panel: {
       background: p.panel,
@@ -1378,18 +1323,21 @@ function createStyles(p) {
       fontSize: 16,
       fontWeight: 800,
       color: "#16a34a",
+      minHeight: 19,
     },
     goldChangeDown: {
       marginTop: 6,
       fontSize: 16,
       fontWeight: 800,
       color: "#dc2626",
+      minHeight: 19,
     },
     goldChangeNeutral: {
       marginTop: 6,
       fontSize: 16,
       fontWeight: 800,
       color: p.textSoft,
+      minHeight: 19,
     },
     goldFooter: {
       marginTop: 14,
@@ -1397,6 +1345,8 @@ function createStyles(p) {
       borderTop: `1px solid ${p.line}`,
       color: p.textSoft,
       fontSize: 13,
+      display: "grid",
+      gap: 6,
     },
     fuelGrid: {
       display: "grid",
@@ -1454,6 +1404,83 @@ function createStyles(p) {
       fontSize: 12,
       color: p.textSoft,
       lineHeight: 1.5,
+    },
+    updateActionBar: {
+      display: "flex",
+      gap: 8,
+      flexWrap: "wrap",
+      marginBottom: 12,
+    },
+    updateBtn: {
+      border: `1px solid ${p.line}`,
+      background: p.surface,
+      color: p.textStrong,
+      padding: "10px 13px",
+      borderRadius: 14,
+      fontWeight: 800,
+      cursor: "pointer",
+      fontSize: 13,
+    },
+    updateBtnPrimary: {
+      border: "none",
+      background: "linear-gradient(135deg, #2563eb, #0f172a)",
+      color: "#fff",
+      padding: "10px 13px",
+      borderRadius: 14,
+      fontWeight: 800,
+      cursor: "pointer",
+      fontSize: 13,
+      boxShadow: `0 12px 28px ${p.shadow}`,
+    },
+    progressCard: {
+      background: p.surface,
+      border: `1px solid ${p.line}`,
+      boxShadow: `0 16px 40px ${p.shadow}`,
+      borderRadius: 18,
+      padding: 14,
+      marginTop: 8,
+    },
+    progressHeader: {
+      display: "flex",
+      justifyContent: "space-between",
+      alignItems: "center",
+      gap: 10,
+      marginBottom: 10,
+    },
+    progressTitle: {
+      fontSize: 14,
+      fontWeight: 800,
+      color: p.textStrong,
+    },
+    progressPercent: {
+      fontSize: 14,
+      fontWeight: 900,
+      color: "#2563eb",
+    },
+    progressTrack: {
+      width: "100%",
+      height: 10,
+      background: p.line,
+      borderRadius: 999,
+      overflow: "hidden",
+    },
+    progressBar: {
+      height: "100%",
+      borderRadius: 999,
+      background: "linear-gradient(90deg, #22c55e, #2563eb)",
+      transition: "width 0.35s ease",
+    },
+    progressMessage: {
+      marginTop: 10,
+      fontSize: 13,
+      color: p.textStrong,
+      fontWeight: 700,
+      wordBreak: "break-word",
+    },
+    progressMeta: {
+      marginTop: 6,
+      fontSize: 12,
+      color: p.textSoft,
     },
   };
 }
