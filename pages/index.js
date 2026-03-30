@@ -320,7 +320,7 @@ export default function Home() {
                       <div style={styles.goldValue}>
                         {formatGoldValue(item.buy_price, item.unit)}
                       </div>
-                      <div style={getGoldChangeStyle(item.change_buy, styles)}>
+                      <div style={getGoldChangeStyle(item.change_buy, styles, item.unit)}>
                         {formatGoldChange(item.change_buy, item.unit)}
                       </div>
                     </div>
@@ -329,7 +329,7 @@ export default function Home() {
                       <div style={styles.goldValue}>
                         {formatGoldValue(item.sell_price, item.unit)}
                       </div>
-                      <div style={getGoldChangeStyle(item.change_sell, styles)}>
+                      <div style={getGoldChangeStyle(item.change_sell, styles, item.unit)}>
                         {formatGoldChange(item.change_sell, item.unit)}
                       </div>
                     </div>
@@ -718,13 +718,13 @@ function formatGoldChange(value, unit) {
 
   const num = Number(value);
 
-  if (Math.abs(num) < 1000 && unit === "VND/lượng") return "";
-  if (Math.abs(num) < 0.01 && unit !== "VND/lượng") return "";
-
   if (unit === "VND/lượng") {
+    if (Math.abs(num) < 1000) return "";
     const sign = num > 0 ? "+" : "-";
     return `${sign}${(Math.abs(num) / 1_000_000).toFixed(1)}M`;
   }
+
+  if (Math.abs(num) < 0.01) return "";
 
   const sign = num > 0 ? "+" : "-";
   return `${sign}${Math.abs(num).toLocaleString("en-US", {
@@ -733,9 +733,20 @@ function formatGoldChange(value, unit) {
   })}`;
 }
 
-function getGoldChangeStyle(change, styles) {
-  if (change == null || Math.abs(Number(change)) < 1000) return styles.goldChangeNeutral;
-  return Number(change) >= 0 ? styles.goldChangeUp : styles.goldChangeDown;
+function getGoldChangeStyle(change, styles, unit) {
+  if (change == null || Number.isNaN(Number(change))) {
+    return styles.goldChangeNeutral;
+  }
+
+  const num = Number(change);
+
+  if (unit === "VND/lượng") {
+    if (Math.abs(num) < 1000) return styles.goldChangeNeutral;
+  } else {
+    if (Math.abs(num) < 0.01) return styles.goldChangeNeutral;
+  }
+
+  return num >= 0 ? styles.goldChangeUp : styles.goldChangeDown;
 }
 
 function getActionStyle(action, styles) {
@@ -762,8 +773,6 @@ function getPalette(theme) {
       surfaceAlt: "#111827",
       line: "#1f2937",
       shadow: "rgba(2,6,23,0.42)",
-      btn: "#e2e8f0",
-      btnText: "#0f172a",
       tab: "rgba(15,23,42,0.8)",
       tabText: "#e2e8f0",
       card: "rgba(15,23,42,0.80)",
@@ -785,8 +794,6 @@ function getPalette(theme) {
     surfaceAlt: "#f8fafc",
     line: "#e2e8f0",
     shadow: "rgba(15,23,42,0.08)",
-    btn: "#0f172a",
-    btnText: "#ffffff",
     tab: "rgba(255,255,255,0.85)",
     tabText: "#0f172a",
     card: "rgba(255,255,255,0.82)",
