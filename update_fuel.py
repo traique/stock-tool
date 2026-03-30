@@ -8,7 +8,8 @@ from bs4 import BeautifulSoup
 
 DB_URL = os.environ["DB_URL"]
 
-FUEL_SOURCE_URL = "https://giaxanghomnay.com/"
+PRIMARY_URL = "https://webgia.com/gia-xang-dau/petrolimex/"
+FALLBACK_URL = "https://giaxanghomnay.com/"
 PETROLIMEX_PRESS_URL = "https://www.petrolimex.com.vn/ndi/thong-cao-bao-chi.html"
 
 
@@ -61,93 +62,110 @@ def parse_effective_time():
         return datetime.now(timezone.utc)
 
 
-def normalize_lines(text):
-    raw_lines = [x.strip() for x in text.splitlines()]
-    lines = []
-    for line in raw_lines:
-        line = re.sub(r"\s+", " ", line).strip()
-        if line:
-            lines.append(line)
-    return lines
-
-
-def extract_best_price_from_text_block(block):
-    candidates = re.findall(r"\d{1,3}(?:[.,]\d{3})+", block)
-    nums = []
-
-    for c in candidates:
-        n = parse_number(c)
-        if n is None:
-            continue
-        # lọc biên hợp lý cho giá xăng dầu VN
-        if 10000 <= n <= 100000:
-            nums.append(n)
-
-    if not nums:
-        return None
-
-    return max(nums)
-
-
-def scrape_fuel():
-    html = fetch_html(FUEL_SOURCE_URL)
-    soup = BeautifulSoup(html, "lxml")
-    text = soup.get_text("\n", strip=True)
-    lines = normalize_lines(text)
-
-    effective_time = parse_effective_time()
-
-    products = [
-        ("RON95-V", ["Xăng RON 95-V"]),
-        ("RON95-III", ["Xăng RON 95-III"]),
-        ("E10 RON95-III", ["Xăng E10 RON 95-III"]),
-        ("E5 RON92-II", ["Xăng E5 RON 92-II"]),
-        ("Diesel 0.001S-V", ["DO 0,001S-V"]),
-        ("Diesel 0.05S-II", ["DO 0,05S-II"]),
-        ("Dầu hỏa 2-K", ["Dầu hỏa 2-K"]),
-        ("Mazut", ["Mazút", "Mazut"]),
+def expected_products():
+    return [
+        ("RON95-V", [r"Xăng\s*RON\s*95-V"]),
+        ("RON95-III", [r"Xăng\s*RON\s*95-III"]),
+        ("E5 RON92-II", [r"Xăng\s*E5\s*RON\s*92-II"]),
+        ("E10 RON95-III", [r"Xăng\s*E10\s*RON\s*95-III"]),
+        ("Diesel 0.001S-V", [r"DO\s*0,001S-V"]),
+        ("Diesel 0.05S-II", [r"DO\s*0,05S-II"]),
+        ("Dầu hỏa 2-K", [r"Dầu\s*hỏa\s*2-K"]),
     ]
 
+
+def scrape_from_webgia():
+    html = fetch_html(PRIMARY_URL)
+    soup = BeautifulSoup(html, "lxml")
+    text = soup.get_text(" ", strip=True)
+    text = re.sub(r"\s+", " ", text)
+
     rows = []
+    effective_time = parse_effective_time()
 
-    for fuel_type, keywords in products:
-        matched_price = None
+    for fuel_type, patterns in expected_products():
+        price = None
 
-        for idx, line in enumerate(lines):
-            lower_line = line.lower()
-            if not any(k.lower() in lower_line for k in keywords):
-                continue
+        for pattern in patterns:
+            # Bắt 2 giá vùng 1 vùng 2, lấy vùng 1
+            m = re.search(
+                pattern + r"\s*([\d\.]+)\s*([\d\.]+)",
+                text,
+                flags=re.IGNORECASE,
+            )
+            if m:
+                p1 = parse_number(m.group(1))
+                p2 = parse_number(m.group(2))
+                if p1 is not None and 10000 <= p1 <= 100000:
+                    price = p1
+                    log(f"WEBGIA MATCH {fuel_type} | p1={p1} p2={p2}")
+                    break
 
-            # gom block xung quanh dòng match để bắt giá gần nhất
-            block_lines = lines[idx : min(idx + 6, len(lines))]
-            block = " | ".join(block_lines)
-
-            price = extract_best_price_from_text_block(block)
-            if price is not None:
-                matched_price = price
-                log(f"MATCH {fuel_type} | price={price} | line={line}")
-                break
-
-        if matched_price is None:
-            log(f"MISS {fuel_type}")
+        if price is None:
+            log(f"WEBGIA MISS {fuel_type}")
             continue
-
-        unit = "VND/kg" if fuel_type == "Mazut" else "VND/liter"
 
         rows.append(
             {
                 "fuel_type": fuel_type,
-                "price": matched_price,
-                "unit": unit,
+                "price": price,
+                "unit": "VND/liter",
                 "effective_time": effective_time,
             }
         )
 
-    dedup = {}
-    for row in rows:
-        dedup[row["fuel_type"]] = row
+    return rows
 
-    return list(dedup.values())
+
+def scrape_from_giaxanghomnay():
+    html = fetch_html(FALLBACK_URL)
+    soup = BeautifulSoup(html, "lxml")
+    text = soup.get_text(" ", strip=True)
+    text = re.sub(r"\s+", " ", text)
+
+    rows = []
+    effective_time = parse_effective_time()
+
+    for fuel_type, patterns in expected_products():
+        price = None
+
+        for pattern in patterns:
+            m = re.search(
+                pattern + r".{0,80}?(\d{1,3}(?:[.,]\d{3})+)",
+                text,
+                flags=re.IGNORECASE,
+            )
+            if m:
+                p1 = parse_number(m.group(1))
+                if p1 is not None and 10000 <= p1 <= 100000:
+                    price = p1
+                    log(f"FALLBACK MATCH {fuel_type} | p1={p1}")
+                    break
+
+        if price is None:
+            log(f"FALLBACK MISS {fuel_type}")
+            continue
+
+        rows.append(
+            {
+                "fuel_type": fuel_type,
+                "price": price,
+                "unit": "VND/liter",
+                "effective_time": effective_time,
+            }
+        )
+
+    return rows
+
+
+def scrape_fuel():
+    rows = scrape_from_webgia()
+    if len(rows) >= 5:
+        return rows
+
+    log("Primary source chưa đủ dữ liệu, chuyển sang fallback")
+    rows = scrape_from_giaxanghomnay()
+    return rows
 
 
 def insert_rows(cur, rows):
