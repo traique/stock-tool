@@ -34,7 +34,10 @@ export default async function handler(req, res) {
       .single();
 
     if (insertError) {
-      return res.status(500).json({ error: insertError.message });
+      return res.status(500).json({
+        error: "Insert job_runs thất bại",
+        detail: insertError.message,
+      });
     }
 
     const owner = process.env.GITHUB_REPO_OWNER;
@@ -44,45 +47,61 @@ export default async function handler(req, res) {
     const token = process.env.GITHUB_WORKFLOW_TOKEN;
 
     if (!owner || !repo || !token) {
-      return res.status(500).json({ error: "Thiếu cấu hình GitHub env" });
+      return res.status(500).json({
+        error: "Thiếu cấu hình GitHub env",
+        debug: {
+          hasOwner: !!owner,
+          hasRepo: !!repo,
+          hasWorkflowToken: !!token,
+          workflow,
+          ref,
+        },
+      });
     }
 
-    const ghRes = await fetch(
-      `https://api.github.com/repos/${owner}/${repo}/actions/workflows/${workflow}/dispatches`,
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          Accept: "application/vnd.github+json",
-          "Content-Type": "application/json",
+    const ghUrl = `https://api.github.com/repos/${owner}/${repo}/actions/workflows/${workflow}/dispatches`;
+
+    const ghRes = await fetch(ghUrl, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: "application/vnd.github+json",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        ref,
+        inputs: {
+          target,
+          job_run_id: String(inserted.id),
         },
-        body: JSON.stringify({
-          ref,
-          inputs: {
-            target,
-            job_run_id: String(inserted.id),
-          },
-        }),
-      }
-    );
+      }),
+    });
+
+    const ghText = await ghRes.text();
 
     if (!ghRes.ok) {
-      const text = await ghRes.text();
-
       await supabase
         .from("job_runs")
         .update({
           status: "failed",
           progress: 100,
           message: "Gọi GitHub Actions thất bại",
-          error_text: text,
+          error_text: ghText,
           finished_at: new Date().toISOString(),
         })
         .eq("id", inserted.id);
 
       return res.status(500).json({
         error: "Không dispatch được workflow",
-        detail: text,
+        github_status: ghRes.status,
+        github_response: ghText,
+        debug: {
+          url: ghUrl,
+          workflow,
+          ref,
+          owner,
+          repo,
+        },
       });
     }
 
@@ -98,6 +117,8 @@ export default async function handler(req, res) {
     return res.status(200).json({
       ok: true,
       job_run_id: inserted.id,
+      github_status: ghRes.status,
+      github_response: ghText || "accepted",
     });
   } catch (err) {
     return res.status(500).json({
