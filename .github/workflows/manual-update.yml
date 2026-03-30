@@ -9,7 +9,8 @@ on:
         default: "stocks"
       job_run_id:
         description: "job_runs.id from Supabase"
-        required: true
+        required: false
+        default: ""
 
 jobs:
   manual-update:
@@ -25,9 +26,17 @@ jobs:
           python-version: "3.11"
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: |
+          python --version
+          pip install -r requirements.txt
+
+      - name: Debug inputs
+        run: |
+          echo "target=${{ github.event.inputs.target }}"
+          echo "job_run_id=${{ github.event.inputs.job_run_id }}"
 
       - name: Mark started
+        if: ${{ github.event.inputs.job_run_id != '' }}
         env:
           DB_URL: ${{ secrets.DB_URL }}
         run: |
@@ -38,7 +47,6 @@ jobs:
         env:
           DB_URL: ${{ secrets.DB_URL }}
         run: |
-          python job_progress.py "${{ github.event.inputs.job_run_id }}" "running" "30" "Đang cập nhật cổ phiếu"
           python update.py
 
       - name: Run gold
@@ -46,7 +54,6 @@ jobs:
         env:
           DB_URL: ${{ secrets.DB_URL }}
         run: |
-          python job_progress.py "${{ github.event.inputs.job_run_id }}" "running" "60" "Đang cập nhật giá vàng"
           python update_gold.py
 
       - name: Run fuel
@@ -54,18 +61,17 @@ jobs:
         env:
           DB_URL: ${{ secrets.DB_URL }}
         run: |
-          python job_progress.py "${{ github.event.inputs.job_run_id }}" "running" "85" "Đang cập nhật giá xăng dầu"
           python update_fuel.py
 
       - name: Mark success
-        if: ${{ success() }}
+        if: ${{ success() && github.event.inputs.job_run_id != '' }}
         env:
           DB_URL: ${{ secrets.DB_URL }}
         run: |
           python job_progress.py "${{ github.event.inputs.job_run_id }}" "success" "100" "Hoàn tất cập nhật"
 
       - name: Mark failure
-        if: ${{ failure() }}
+        if: ${{ failure() && github.event.inputs.job_run_id != '' }}
         env:
           DB_URL: ${{ secrets.DB_URL }}
         run: |
