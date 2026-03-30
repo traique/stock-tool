@@ -1,29 +1,23 @@
 import { createClient } from "@supabase/supabase-js";
 
 export default async function handler(req, res) {
-  if (req.method !== "GET") {
-    return res.status(405).json({ error: "Method not allowed" });
-  }
-
   try {
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const supabaseKey =
-      process.env.SUPABASE_SERVICE_ROLE_KEY ||
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+    const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
     if (!supabaseUrl) {
       return res.status(500).json({ error: "Missing NEXT_PUBLIC_SUPABASE_URL" });
     }
 
-    if (!supabaseKey) {
-      return res.status(500).json({ error: "Missing Supabase key" });
+    if (!serviceRoleKey) {
+      return res.status(500).json({ error: "Missing SUPABASE_SERVICE_ROLE_KEY" });
     }
 
-    const supabase = createClient(supabaseUrl, supabaseKey);
+    const supabase = createClient(supabaseUrl, serviceRoleKey);
 
-    const { data, error } = await supabase
+    const { data, error, count } = await supabase
       .from("gold_prices")
-      .select("*")
+      .select("*", { count: "exact" })
       .order("price_time", { ascending: false })
       .order("id", { ascending: false });
 
@@ -31,7 +25,6 @@ export default async function handler(req, res) {
       return res.status(500).json({
         error: error.message,
         where: "gold_prices",
-        debug_project_url: supabaseUrl,
       });
     }
 
@@ -44,17 +37,14 @@ export default async function handler(req, res) {
       }
     }
 
-    let ordered = wanted.map((key) => latestMap.get(key)).filter(Boolean);
-
-    if (ordered.length === 0) {
-      ordered = (data || []).slice(0, 5);
-    }
+    const items = wanted.map((k) => latestMap.get(k)).filter(Boolean);
 
     return res.status(200).json({
+      debug_using_service_role: true,
       debug_project_url: supabaseUrl,
-      debug_total_rows: (data || []).length,
-      debug_returned_rows: ordered.length,
-      items: ordered,
+      debug_total_rows: count ?? (data || []).length,
+      debug_returned_rows: items.length,
+      items,
     });
   } catch (err) {
     return res.status(500).json({
