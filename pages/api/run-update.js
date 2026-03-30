@@ -1,15 +1,28 @@
 import { createClient } from "@supabase/supabase-js";
 
+function normalizeTarget(value) {
+  const v = String(value || "").trim().toLowerCase();
+  if (v === "stock" || v === "stocks") return "stocks";
+  if (v === "gold") return "gold";
+  if (v === "fuel" || v === "gas") return "fuel";
+  if (v === "all") return "all";
+  return null;
+}
+
 export default async function handler(req, res) {
   if (req.method !== "POST") {
     return res.status(405).json({ error: "Method not allowed" });
   }
 
   try {
-    const { target } = req.body || {};
+    const rawTarget = req.body?.target;
+    const target = normalizeTarget(rawTarget);
 
-    if (!["stocks", "gold", "fuel", "all"].includes(target)) {
-      return res.status(400).json({ error: "Target không hợp lệ" });
+    if (!target) {
+      return res.status(400).json({
+        error: "Target không hợp lệ",
+        rawTarget,
+      });
     }
 
     const supabase = createClient(
@@ -25,7 +38,7 @@ export default async function handler(req, res) {
           target,
           status: "queued",
           progress: 5,
-          message: "Đã tạo lệnh chạy",
+          message: `Đã tạo lệnh chạy cho ${target}`,
           source: "manual",
           started_at: new Date().toISOString(),
         },
@@ -47,19 +60,37 @@ export default async function handler(req, res) {
     const token = process.env.GITHUB_WORKFLOW_TOKEN;
 
     if (!owner || !repo || !token) {
+      await supabase
+        .from("job_runs")
+        .update({
+          status: "failed",
+          progress: 100,
+          message: "Thiếu cấu hình GitHub env",
+          error_text: JSON.stringify({
+            hasOwner: !!owner,
+            hasRepo: !!repo,
+            hasToken: !!token,
+            workflow,
+            ref,
+          }),
+          finished_at: new Date().toISOString(),
+        })
+        .eq("id", inserted.id);
+
       return res.status(500).json({
         error: "Thiếu cấu hình GitHub env",
-        debug: {
-          hasOwner: !!owner,
-          hasRepo: !!repo,
-          hasWorkflowToken: !!token,
-          workflow,
-          ref,
-        },
       });
     }
 
     const ghUrl = `https://api.github.com/repos/${owner}/${repo}/actions/workflows/${workflow}/dispatches`;
+
+    const payload = {
+      ref,
+      inputs: {
+        target,
+        job_run_id: String(inserted.id),
+      },
+    };
 
     const ghRes = await fetch(ghUrl, {
       method: "POST",
@@ -68,13 +99,7 @@ export default async function handler(req, res) {
         Accept: "application/vnd.github+json",
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({
-        ref,
-        inputs: {
-          target,
-          job_run_id: String(inserted.id),
-        },
-      }),
+      body: JSON.stringify(payload),
     });
 
     const ghText = await ghRes.text();
@@ -95,13 +120,7 @@ export default async function handler(req, res) {
         error: "Không dispatch được workflow",
         github_status: ghRes.status,
         github_response: ghText,
-        debug: {
-          url: ghUrl,
-          workflow,
-          ref,
-          owner,
-          repo,
-        },
+        payload,
       });
     }
 
@@ -110,15 +129,15 @@ export default async function handler(req, res) {
       .update({
         status: "running",
         progress: 10,
-        message: "Đã gửi lệnh sang GitHub Actions",
+        message: `Đã gửi lệnh ${target} sang GitHub Actions`,
+        error_text: JSON.stringify(payload),
       })
       .eq("id", inserted.id);
 
     return res.status(200).json({
       ok: true,
       job_run_id: inserted.id,
-      github_status: ghRes.status,
-      github_response: ghText || "accepted",
+      payload,
     });
   } catch (err) {
     return res.status(500).json({
