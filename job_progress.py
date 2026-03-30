@@ -34,29 +34,29 @@ def update_job(job_run_id, status=None, progress=None, message=None, error_text=
     values = []
 
     if status is not None:
-      fields.append("status = %s")
-      values.append(status)
+        fields.append("status = %s")
+        values.append(status)
 
     if progress is not None:
-      fields.append("progress = %s")
-      values.append(progress)
+        fields.append("progress = %s")
+        values.append(progress)
 
     if message is not None:
-      fields.append("message = %s")
-      values.append(message)
+        fields.append("message = %s")
+        values.append(message)
 
     if error_text is not None:
-      fields.append("error_text = %s")
-      values.append(error_text)
+        fields.append("error_text = %s")
+        values.append(error_text)
 
     if finished:
-      fields.append("finished_at = %s")
-      values.append(datetime.now(timezone.utc))
+        fields.append("finished_at = %s")
+        values.append(datetime.now(timezone.utc))
 
     if not fields:
-      cur.close()
-      conn.close()
-      return
+        cur.close()
+        conn.close()
+        return
 
     values.append(job_run_id)
 
