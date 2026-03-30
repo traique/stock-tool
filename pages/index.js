@@ -166,17 +166,22 @@ export default function Home() {
       });
 
       const data = await res.json();
+      console.log("run-update response", data);
 
       if (!res.ok) {
-        setJobRunning(false);
-        setJobStatus({
-          target,
-          status: "failed",
-          progress: 100,
-          message: data.error || "Không gọi được workflow",
-        });
-        return;
-      }
+       setJobRunning(false);
+       setJobStatus({
+        target,
+        status: "failed",
+        progress: 100,
+        message:
+         data.github_response ||
+         data.detail ||
+         data.error ||
+        "Không gọi được workflow",
+      });
+      return;
+     }
 
       await pollJob(data.job_run_id);
     } catch {
