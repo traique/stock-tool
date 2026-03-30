@@ -1,0 +1,72 @@
+name: Manual Update
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "stocks | gold | fuel | all"
+        required: true
+        default: "stocks"
+      job_run_id:
+        description: "job_runs.id from Supabase"
+        required: true
+
+jobs:
+  manual-update:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Mark started
+        env:
+          DB_URL: ${{ secrets.DB_URL }}
+        run: |
+          python job_progress.py "${{ github.event.inputs.job_run_id }}" "running" "12" "Khởi tạo workflow"
+
+      - name: Run stocks
+        if: ${{ github.event.inputs.target == 'stocks' || github.event.inputs.target == 'all' }}
+        env:
+          DB_URL: ${{ secrets.DB_URL }}
+        run: |
+          python job_progress.py "${{ github.event.inputs.job_run_id }}" "running" "30" "Đang cập nhật cổ phiếu"
+          python update.py
+
+      - name: Run gold
+        if: ${{ github.event.inputs.target == 'gold' || github.event.inputs.target == 'all' }}
+        env:
+          DB_URL: ${{ secrets.DB_URL }}
+        run: |
+          python job_progress.py "${{ github.event.inputs.job_run_id }}" "running" "60" "Đang cập nhật giá vàng"
+          python update_gold.py
+
+      - name: Run fuel
+        if: ${{ github.event.inputs.target == 'fuel' || github.event.inputs.target == 'all' }}
+        env:
+          DB_URL: ${{ secrets.DB_URL }}
+        run: |
+          python job_progress.py "${{ github.event.inputs.job_run_id }}" "running" "85" "Đang cập nhật giá xăng dầu"
+          python update_fuel.py
+
+      - name: Mark success
+        if: ${{ success() }}
+        env:
+          DB_URL: ${{ secrets.DB_URL }}
+        run: |
+          python job_progress.py "${{ github.event.inputs.job_run_id }}" "success" "100" "Hoàn tất cập nhật"
+
+      - name: Mark failure
+        if: ${{ failure() }}
+        env:
+          DB_URL: ${{ secrets.DB_URL }}
+        run: |
+          python job_progress.py "${{ github.event.inputs.job_run_id }}" "failed" "100" "Job thất bại"
