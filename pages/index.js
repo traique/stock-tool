@@ -10,13 +10,13 @@ export default function Home() {
   const [newSymbol, setNewSymbol] = useState("");
   const [loading, setLoading] = useState(true);
   const [status, setStatus] = useState(null);
+  const [jobStatus, setJobStatus] = useState(null);
+  const [jobRunning, setJobRunning] = useState(false);
 
   useEffect(() => {
-    const savedTheme =
+    const saved =
       typeof window !== "undefined" ? localStorage.getItem("alpha-theme") : null;
-    if (savedTheme === "dark" || savedTheme === "light") {
-      setTheme(savedTheme);
-    }
+    if (saved === "dark" || saved === "light") setTheme(saved);
   }, []);
 
   useEffect(() => {
@@ -60,8 +60,7 @@ export default function Home() {
       if (mode === "gold") {
         setGoldItems(Array.isArray(data) ? data : []);
       } else if (mode === "fuel") {
-        const raw = Array.isArray(data) ? data : [];
-        setFuelItems(sortFuelItems(raw));
+        setFuelItems(sortFuelItems(Array.isArray(data) ? data : []));
       } else {
         setItems(Array.isArray(data) ? data : []);
       }
@@ -125,14 +124,70 @@ export default function Home() {
     } catch {}
   };
 
-  const topBuyCount = items.filter((x) => x.signal_action === "BUY").length;
-  const topHoldCount = items.filter((x) => x.signal_action === "HOLD").length;
-  const avgScore =
-    items.length > 0
-      ? (
-          items.reduce((sum, x) => sum + Number(x.total_score || 0), 0) / items.length
-        ).toFixed(1)
-      : "-";
+  const pollJob = async (jobId) => {
+    const timer = setInterval(async () => {
+      try {
+        const res = await fetch(`/api/job-status?id=${jobId}`);
+        const data = await res.json();
+
+        setJobStatus(data);
+
+        if (!data) return;
+
+        if (data.status === "success" || data.status === "failed") {
+          clearInterval(timer);
+          setJobRunning(false);
+          await loadData();
+          await loadStatus();
+        }
+      } catch {
+        clearInterval(timer);
+        setJobRunning(false);
+      }
+    }, 2500);
+  };
+
+  const runUpdate = async (target) => {
+    try {
+      setJobRunning(true);
+      setJobStatus({
+        target,
+        status: "queued",
+        progress: 5,
+        message: "Đang gửi lệnh chạy...",
+      });
+
+      const res = await fetch("/api/run-update", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ target }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        setJobRunning(false);
+        setJobStatus({
+          target,
+          status: "failed",
+          progress: 100,
+          message: data.error || "Không gọi được workflow",
+        });
+        return;
+      }
+
+      await pollJob(data.job_run_id);
+    } catch {
+      setJobRunning(false);
+      setJobStatus({
+        status: "failed",
+        progress: 100,
+        message: "Lỗi khi gửi lệnh chạy",
+      });
+    }
+  };
 
   return (
     <div style={styles.page}>
@@ -141,46 +196,38 @@ export default function Home() {
 
       <div style={styles.container}>
         <section style={styles.heroCard}>
-          <div style={styles.heroLeft}>
-            <div style={styles.eyebrow}>Hệ điều hành đầu tư cá nhân</div>
-            <h1 style={styles.heroTitle}>🚀 AlphaPulse Elite</h1>
-            <div style={styles.heroSubtitle}>
-              Trung tâm điều khiển cổ phiếu, vàng và xăng dầu với tín hiệu giao dịch
-              chuyên sâu, vùng mua, cắt lỗ, chốt lời và nhịp thị trường theo thời gian thực.
+          <div style={styles.heroHeader}>
+            <div style={styles.heroLeft}>
+              <div style={styles.eyebrow}>Hệ điều hành đầu tư cá nhân</div>
+              <h1 style={styles.heroTitle}>🚀 AlphaPulse Elite</h1>
+              <div style={styles.heroSubtitle}>
+                Trung tâm theo dõi cổ phiếu, vàng và xăng dầu với tín hiệu giao dịch,
+                vùng mua, cắt lỗ, chốt lời và nhịp cập nhật thị trường.
+              </div>
             </div>
 
-            <div style={styles.heroStats}>
-              <StatPill label="BUY" value={topBuyCount} tone="green" theme={theme} />
-              <StatPill label="HOLD" value={topHoldCount} tone="blue" theme={theme} />
-              <StatPill label="Score TB" value={avgScore} tone="dark" theme={theme} />
-            </div>
+            <button
+              onClick={() => setTheme(theme === "light" ? "dark" : "light")}
+              style={styles.themeIconBtn}
+              aria-label="Đổi giao diện"
+              title="Đổi giao diện"
+            >
+              {theme === "light" ? "🌙" : "☀️"}
+            </button>
           </div>
 
-          <div style={styles.heroRight}>
-            <div style={styles.topActionRow}>
-              <button
-                onClick={() => setTheme(theme === "light" ? "dark" : "light")}
-                style={styles.themeBtn}
-              >
-                {theme === "light" ? "🌙 Giao diện tối" : "☀️ Giao diện sáng"}
-              </button>
+          <div style={styles.heroInfoGrid}>
+            <div style={styles.statusCard}>
+              <div style={styles.statusLabel}>Dữ liệu thị trường mới nhất</div>
+              <div style={styles.statusValue}>
+                {formatDateTime(status?.last_updated) || "Chưa có dữ liệu"}
+              </div>
             </div>
 
             <div style={styles.statusCard}>
-              <div style={styles.statusBlock}>
-                <div style={styles.statusLabel}>Dữ liệu thị trường mới nhất</div>
-                <div style={styles.statusValue}>
-                  {formatDateTime(status?.last_updated) || "Chưa có dữ liệu"}
-                </div>
-              </div>
-
-              <div style={styles.statusDivider} />
-
-              <div style={styles.statusBlock}>
-                <div style={styles.statusLabel}>GitHub update chạy lúc</div>
-                <div style={styles.statusValue}>
-                  {formatDateTime(status?.github_update_at) || "Chưa có dữ liệu"}
-                </div>
+              <div style={styles.statusLabel}>GitHub update chạy lúc</div>
+              <div style={styles.statusValue}>
+                {formatDateTime(status?.github_update_at) || "Chưa có dữ liệu"}
               </div>
             </div>
           </div>
@@ -193,6 +240,57 @@ export default function Home() {
           <TabButton active={mode === "gold"} onClick={() => setMode("gold")} label="🥇 Giá vàng" styles={styles} />
           <TabButton active={mode === "fuel"} onClick={() => setMode("fuel")} label="⛽ Giá xăng" styles={styles} />
         </div>
+
+        <div style={styles.updateActionBar}>
+          <button style={styles.updateBtn} onClick={() => runUpdate("stocks")} disabled={jobRunning}>
+            🔄 Cập nhật cổ phiếu
+          </button>
+          <button style={styles.updateBtn} onClick={() => runUpdate("gold")} disabled={jobRunning}>
+            🥇 Cập nhật vàng
+          </button>
+          <button style={styles.updateBtn} onClick={() => runUpdate("fuel")} disabled={jobRunning}>
+            ⛽ Cập nhật xăng
+          </button>
+          <button style={styles.updateBtnPrimary} onClick={() => runUpdate("all")} disabled={jobRunning}>
+            ⚡ Cập nhật tất cả
+          </button>
+        </div>
+
+        {jobStatus ? (
+          <div style={styles.progressCard}>
+            <div style={styles.progressHeader}>
+              <div style={styles.progressTitle}>
+                {jobStatus.target === "stocks"
+                  ? "Tiến trình cập nhật cổ phiếu"
+                  : jobStatus.target === "gold"
+                  ? "Tiến trình cập nhật vàng"
+                  : jobStatus.target === "fuel"
+                  ? "Tiến trình cập nhật xăng"
+                  : "Tiến trình cập nhật toàn bộ"}
+              </div>
+              <div style={styles.progressPercent}>
+                {Number(jobStatus.progress || 0)}%
+              </div>
+            </div>
+
+            <div style={styles.progressTrack}>
+              <div
+                style={{
+                  ...styles.progressBar,
+                  width: `${Number(jobStatus.progress || 0)}%`,
+                }}
+              />
+            </div>
+
+            <div style={styles.progressMessage}>
+              {jobStatus.message || "Đang xử lý..."}
+            </div>
+
+            <div style={styles.progressMeta}>
+              Trạng thái: <strong>{jobStatus.status || "queued"}</strong>
+            </div>
+          </div>
+        ) : null}
 
         {mode === "watchlist" ? (
           <section style={styles.panel}>
@@ -494,35 +592,13 @@ function TabButton({ active, onClick, label, styles }) {
   );
 }
 
-function StatPill({ label, value, tone, theme }) {
-  const toneStyles = {
-    green:
-      theme === "dark"
-        ? { background: "rgba(34,197,94,0.18)", color: "#4ade80" }
-        : { background: "#dcfce7", color: "#166534" },
-    blue:
-      theme === "dark"
-        ? { background: "rgba(59,130,246,0.18)", color: "#60a5fa" }
-        : { background: "#dbeafe", color: "#1d4ed8" },
-    dark:
-      theme === "dark"
-        ? { background: "rgba(148,163,184,0.14)", color: "#e2e8f0" }
-        : { background: "#e2e8f0", color: "#0f172a" },
-  };
-
-  return (
-    <div style={{ ...baseStyles.statPill, ...toneStyles[tone] }}>
-      <div style={baseStyles.statLabel}>{label}</div>
-      <div style={baseStyles.statValue}>{value}</div>
-    </div>
-  );
-}
-
 function Metric({ title, value, sub, color, styles }) {
   return (
     <div style={styles.metricCard}>
       <div style={styles.metricTitle}>{title}</div>
-      <div style={{ ...styles.metricValue, color: color || styles.metricValue.color }}>{value}</div>
+      <div style={{ ...styles.metricValue, color: color || styles.metricValue.color }}>
+        {value}
+      </div>
       {sub ? <div style={styles.metricSub}>{sub}</div> : null}
     </div>
   );
@@ -647,6 +723,7 @@ function getActionStyle(action, styles) {
 function getPalette(theme) {
   if (theme === "dark") {
     return {
+      theme: "dark",
       bg:
         "radial-gradient(circle at top left, rgba(59,130,246,0.16), transparent 28%), radial-gradient(circle at top right, rgba(16,185,129,0.16), transparent 24%), #020617",
       glow1: "rgba(59,130,246,0.14)",
@@ -654,11 +731,9 @@ function getPalette(theme) {
       panel: "rgba(15,23,42,0.78)",
       panelBorder: "rgba(148,163,184,0.16)",
       textStrong: "#f8fafc",
-      text: "#e2e8f0",
       textSoft: "#94a3b8",
       surface: "#0f172a",
       surfaceAlt: "#111827",
-      metric: "#111827",
       line: "#1f2937",
       shadow: "rgba(2,6,23,0.42)",
       btn: "#e2e8f0",
@@ -666,11 +741,12 @@ function getPalette(theme) {
       tab: "rgba(15,23,42,0.8)",
       tabText: "#e2e8f0",
       card: "rgba(15,23,42,0.80)",
-      lightSurface: "#0f172a",
+      metric: "#111827",
     };
   }
 
   return {
+    theme: "light",
     bg:
       "radial-gradient(circle at top left, rgba(59,130,246,0.12), transparent 28%), radial-gradient(circle at top right, rgba(16,185,129,0.10), transparent 24%), #eef2f7",
     glow1: "rgba(59,130,246,0.10)",
@@ -678,11 +754,9 @@ function getPalette(theme) {
     panel: "rgba(255,255,255,0.82)",
     panelBorder: "rgba(255,255,255,0.65)",
     textStrong: "#0f172a",
-    text: "#334155",
     textSoft: "#64748b",
     surface: "#ffffff",
     surfaceAlt: "#f8fafc",
-    metric: "#f8fafc",
     line: "#e2e8f0",
     shadow: "rgba(15,23,42,0.08)",
     btn: "#0f172a",
@@ -690,34 +764,16 @@ function getPalette(theme) {
     tab: "rgba(255,255,255,0.85)",
     tabText: "#0f172a",
     card: "rgba(255,255,255,0.82)",
-    lightSurface: "#ffffff",
+    metric: "#f8fafc",
   };
 }
-
-const baseStyles = {
-  statPill: {
-    minWidth: 98,
-    padding: "10px 14px",
-    borderRadius: 16,
-  },
-  statLabel: {
-    fontSize: 11,
-    fontWeight: 700,
-    opacity: 0.8,
-    marginBottom: 4,
-  },
-  statValue: {
-    fontSize: 22,
-    fontWeight: 900,
-  },
-};
 
 function createStyles(p) {
   return {
     page: {
       minHeight: "100vh",
       background: p.bg,
-      padding: 14,
+      padding: 12,
       fontFamily:
         'Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
       position: "relative",
@@ -725,8 +781,8 @@ function createStyles(p) {
     },
     bgGlow1: {
       position: "fixed",
-      width: 280,
-      height: 280,
+      width: 260,
+      height: 260,
       borderRadius: "50%",
       background: p.glow1,
       filter: "blur(90px)",
@@ -736,8 +792,8 @@ function createStyles(p) {
     },
     bgGlow2: {
       position: "fixed",
-      width: 260,
-      height: 260,
+      width: 240,
+      height: 240,
       borderRadius: "50%",
       background: p.glow2,
       filter: "blur(90px)",
@@ -752,33 +808,32 @@ function createStyles(p) {
       zIndex: 1,
     },
     heroCard: {
-      display: "flex",
-      justifyContent: "space-between",
-      gap: 16,
-      flexWrap: "wrap",
-      padding: 18,
-      borderRadius: 24,
+      padding: 16,
+      borderRadius: 22,
       background: p.panel,
       backdropFilter: "blur(14px)",
       boxShadow: `0 20px 50px ${p.shadow}`,
       border: `1px solid ${p.panelBorder}`,
-      marginBottom: 16,
+      marginBottom: 14,
+    },
+    heroHeader: {
+      display: "flex",
+      justifyContent: "space-between",
+      alignItems: "flex-start",
+      gap: 12,
+      marginBottom: 14,
     },
     heroLeft: {
       flex: 1,
-      minWidth: 240,
-    },
-    heroRight: {
-      width: 320,
-      maxWidth: "100%",
+      minWidth: 0,
     },
     eyebrow: {
       fontSize: 11,
       textTransform: "uppercase",
-      letterSpacing: 1.3,
+      letterSpacing: 1.2,
       color: p.textSoft,
       fontWeight: 800,
-      marginBottom: 10,
+      marginBottom: 8,
     },
     heroTitle: {
       margin: 0,
@@ -792,51 +847,37 @@ function createStyles(p) {
       fontSize: 14,
       lineHeight: 1.7,
       color: p.textSoft,
-      maxWidth: 700,
+      maxWidth: 760,
     },
-    heroStats: {
-      display: "flex",
-      flexWrap: "wrap",
-      gap: 10,
-      marginTop: 18,
-    },
-    topActionRow: {
-      display: "flex",
-      justifyContent: "flex-end",
-      marginBottom: 10,
-    },
-    themeBtn: {
-      border: "none",
-      background: p.btn,
-      color: p.btnText,
-      padding: "10px 14px",
+    themeIconBtn: {
+      width: 44,
+      height: 44,
+      minWidth: 44,
       borderRadius: 14,
-      fontWeight: 800,
+      border: `1px solid ${p.line}`,
+      background: p.surface,
+      color: p.textStrong,
+      fontSize: 20,
       cursor: "pointer",
-      boxShadow: `0 10px 24px ${p.shadow}`,
-      width: "100%",
+      boxShadow: `0 12px 28px ${p.shadow}`,
+    },
+    heroInfoGrid: {
+      display: "grid",
+      gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+      gap: 10,
     },
     statusCard: {
-      padding: 16,
-      borderRadius: 20,
+      padding: 14,
+      borderRadius: 18,
       background: p.surface,
-      boxShadow: `0 16px 40px ${p.shadow}`,
+      boxShadow: `0 12px 28px ${p.shadow}`,
       border: `1px solid ${p.line}`,
-    },
-    statusBlock: {
-      display: "flex",
-      flexDirection: "column",
-      gap: 6,
-    },
-    statusDivider: {
-      height: 1,
-      background: p.line,
-      margin: "12px 0",
     },
     statusLabel: {
       fontSize: 12,
       color: p.textSoft,
       fontWeight: 700,
+      marginBottom: 6,
     },
     statusValue: {
       fontSize: 14,
@@ -848,13 +889,13 @@ function createStyles(p) {
       display: "flex",
       gap: 8,
       flexWrap: "wrap",
-      marginBottom: 16,
+      marginBottom: 12,
     },
     tab: {
       border: `1px solid ${p.line}`,
       background: p.tab,
       color: p.tabText,
-      padding: "10px 14px",
+      padding: "10px 13px",
       borderRadius: 14,
       cursor: "pointer",
       fontWeight: 800,
@@ -865,12 +906,88 @@ function createStyles(p) {
       border: "1px solid transparent",
       background: "linear-gradient(135deg, #2563eb, #0f172a)",
       color: "#fff",
-      padding: "10px 14px",
+      padding: "10px 13px",
       borderRadius: 14,
       cursor: "pointer",
       fontWeight: 800,
       fontSize: 13,
       boxShadow: `0 12px 28px ${p.shadow}`,
+    },
+    updateActionBar: {
+      display: "flex",
+      gap: 8,
+      flexWrap: "wrap",
+      marginBottom: 12,
+    },
+    updateBtn: {
+      border: `1px solid ${p.line}`,
+      background: p.surface,
+      color: p.textStrong,
+      padding: "10px 13px",
+      borderRadius: 14,
+      fontWeight: 800,
+      cursor: "pointer",
+      fontSize: 13,
+    },
+    updateBtnPrimary: {
+      border: "none",
+      background: "linear-gradient(135deg, #2563eb, #0f172a)",
+      color: "#fff",
+      padding: "10px 13px",
+      borderRadius: 14,
+      fontWeight: 800,
+      cursor: "pointer",
+      fontSize: 13,
+      boxShadow: `0 12px 28px ${p.shadow}`,
+    },
+    progressCard: {
+      background: p.panel,
+      border: `1px solid ${p.panelBorder}`,
+      boxShadow: `0 20px 50px ${p.shadow}`,
+      borderRadius: 18,
+      padding: 14,
+      marginBottom: 14,
+    },
+    progressHeader: {
+      display: "flex",
+      justifyContent: "space-between",
+      alignItems: "center",
+      gap: 10,
+      marginBottom: 10,
+    },
+    progressTitle: {
+      fontSize: 14,
+      fontWeight: 800,
+      color: p.textStrong,
+    },
+    progressPercent: {
+      fontSize: 14,
+      fontWeight: 900,
+      color: "#2563eb",
+    },
+    progressTrack: {
+      width: "100%",
+      height: 10,
+      background: p.line,
+      borderRadius: 999,
+      overflow: "hidden",
+    },
+    progressBar: {
+      height: "100%",
+      borderRadius: 999,
+      background: "linear-gradient(90deg, #22c55e, #2563eb)",
+      transition: "width 0.35s ease",
+    },
+    progressMessage: {
+      marginTop: 10,
+      fontSize: 13,
+      color: p.textStrong,
+      fontWeight: 700,
+    },
+    progressMeta: {
+      marginTop: 6,
+      fontSize: 12,
+      color: p.textSoft,
     },
     panel: {
       background: p.panel,
@@ -879,7 +996,7 @@ function createStyles(p) {
       padding: 16,
       boxShadow: `0 20px 50px ${p.shadow}`,
       border: `1px solid ${p.panelBorder}`,
-      marginBottom: 16,
+      marginBottom: 14,
     },
     panelHeader: {
       display: "flex",
@@ -1106,7 +1223,7 @@ function createStyles(p) {
     },
     metricGrid: {
       display: "grid",
-      gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
+      gridTemplateColumns: "repeat(auto-fit, minmax(138px, 1fr))",
       gap: 10,
     },
     metricCard: {
@@ -1142,7 +1259,7 @@ function createStyles(p) {
     tradeBox: {
       marginTop: 14,
       background:
-        p.textStrong === "#f8fafc"
+        p.theme === "dark"
           ? "linear-gradient(180deg, rgba(30,41,59,0.9), rgba(15,23,42,0.9))"
           : "linear-gradient(180deg, #eff6ff, #f8fbff)",
       borderRadius: 18,
@@ -1213,7 +1330,7 @@ function createStyles(p) {
     },
     goldHeaderRow: {
       display: "grid",
-      gridTemplateColumns: "1.25fr 1fr 1fr",
+      gridTemplateColumns: "1.15fr 1fr 1fr",
       gap: 10,
       marginBottom: 14,
       color: p.textSoft,
@@ -1226,14 +1343,14 @@ function createStyles(p) {
     },
     goldRow: {
       display: "grid",
-      gridTemplateColumns: "1.25fr 1fr 1fr",
+      gridTemplateColumns: "1.15fr 1fr 1fr",
       gap: 10,
       padding: "16px 0",
       borderTop: `1px solid ${p.line}`,
     },
     goldNameCol: {},
     goldName: {
-      fontSize: 22,
+      fontSize: 21,
       fontWeight: 900,
       color: p.textStrong,
       lineHeight: 1.2,
@@ -1247,7 +1364,7 @@ function createStyles(p) {
       textAlign: "right",
     },
     goldValue: {
-      fontSize: 26,
+      fontSize: 25,
       fontWeight: 900,
       color: p.textStrong,
     },
@@ -1278,12 +1395,12 @@ function createStyles(p) {
     },
     fuelGrid: {
       display: "grid",
-      gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+      gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))",
       gap: 12,
     },
     fuelCard: {
       background:
-        p.textStrong === "#f8fafc"
+        p.theme === "dark"
           ? "linear-gradient(135deg, #0f172a, #111827)"
           : "linear-gradient(135deg, #ffffff, #f8fbff)",
       borderRadius: 20,
@@ -1304,8 +1421,8 @@ function createStyles(p) {
       display: "inline-block",
       padding: "5px 9px",
       borderRadius: 999,
-      background: p.textStrong === "#f8fafc" ? "rgba(59,130,246,0.18)" : "#eef2ff",
-      color: p.textStrong === "#f8fafc" ? "#93c5fd" : "#4338ca",
+      background: p.theme === "dark" ? "rgba(59,130,246,0.18)" : "#eef2ff",
+      color: p.theme === "dark" ? "#93c5fd" : "#4338ca",
       fontSize: 11,
       fontWeight: 800,
     },
