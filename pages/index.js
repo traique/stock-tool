@@ -141,19 +141,34 @@ export default function Home() {
         </div>
 
         <div style={styles.tabs}>
-          <button onClick={() => setMode("dashboard")} style={mode === "dashboard" ? styles.tabActive : styles.tab}>
+          <button
+            onClick={() => setMode("dashboard")}
+            style={mode === "dashboard" ? styles.tabActive : styles.tab}
+          >
             Dashboard
           </button>
-          <button onClick={() => setMode("screener")} style={mode === "screener" ? styles.tabActive : styles.tab}>
+          <button
+            onClick={() => setMode("screener")}
+            style={mode === "screener" ? styles.tabActive : styles.tab}
+          >
             Screener
           </button>
-          <button onClick={() => setMode("watchlist")} style={mode === "watchlist" ? styles.tabActive : styles.tab}>
+          <button
+            onClick={() => setMode("watchlist")}
+            style={mode === "watchlist" ? styles.tabActive : styles.tab}
+          >
             Watchlist
           </button>
-          <button onClick={() => setMode("gold")} style={mode === "gold" ? styles.tabActive : styles.tab}>
+          <button
+            onClick={() => setMode("gold")}
+            style={mode === "gold" ? styles.tabActive : styles.tab}
+          >
             Giá vàng
           </button>
-          <button onClick={() => setMode("fuel")} style={mode === "fuel" ? styles.tabActive : styles.tab}>
+          <button
+            onClick={() => setMode("fuel")}
+            style={mode === "fuel" ? styles.tabActive : styles.tab}
+          >
             Giá xăng
           </button>
         </div>
@@ -195,52 +210,71 @@ export default function Home() {
           goldItems.length === 0 ? (
             <div style={styles.empty}>Chưa có dữ liệu giá vàng</div>
           ) : (
-            goldItems.map((item, idx) => (
-              <div key={`${item.source}-${item.gold_type}-${idx}`} style={styles.card}>
-                <div style={styles.cardTop}>
-                  <div>
-                    <div style={styles.symbol}>{item.gold_type}</div>
-                    <div style={styles.meta}>{item.source}</div>
+            <div style={styles.goldBoard}>
+              <div style={styles.goldHeaderRow}>
+                <div style={styles.goldHeaderName}>Tên</div>
+                <div style={styles.goldHeaderPrice}>Mua vào</div>
+                <div style={styles.goldHeaderPrice}>Bán ra</div>
+              </div>
+
+              {goldItems.map((item, idx) => (
+                <div key={`${item.gold_type}-${idx}`} style={styles.goldRow}>
+                  <div style={styles.goldNameCol}>
+                    <div style={styles.goldName}>{item.display_name || item.gold_type}</div>
+                    <div style={styles.goldSubtitle}>{item.subtitle || item.source}</div>
+                  </div>
+
+                  <div style={styles.goldPriceCol}>
+                    <div style={getGoldPriceStyle(item.change_buy)}>
+                      {formatGoldValue(item.buy_price, item.unit)}
+                    </div>
+                    <div style={getGoldChangeStyle(item.change_buy)}>
+                      {formatGoldChange(item.change_buy, item.unit)}
+                    </div>
+                  </div>
+
+                  <div style={styles.goldPriceCol}>
+                    <div style={getGoldPriceStyle(item.change_sell)}>
+                      {formatGoldValue(item.sell_price, item.unit)}
+                    </div>
+                    <div style={getGoldChangeStyle(item.change_sell)}>
+                      {formatGoldChange(item.change_sell, item.unit)}
+                    </div>
                   </div>
                 </div>
+              ))}
 
-                <div style={styles.grid}>
-                  <Metric title="Mua vào" value={formatPrice(item.buy_price)} />
-                  <Metric title="Bán ra" value={formatPrice(item.sell_price)} />
+              {goldItems[0]?.price_time ? (
+                <div style={styles.goldFooter}>
+                  Cập nhật: {formatDateTime(goldItems[0]?.price_time)}
                 </div>
-
-                <div style={styles.noteBox}>
-                  <div style={styles.noteTitle}>Cập nhật</div>
-                  <div style={styles.noteText}>{formatDateTime(item.price_time)}</div>
-                </div>
-              </div>
-            ))
+              ) : null}
+            </div>
           )
         ) : mode === "fuel" ? (
           fuelItems.length === 0 ? (
             <div style={styles.empty}>Chưa có dữ liệu giá xăng</div>
           ) : (
-            fuelItems.map((item, idx) => (
-              <div key={`${item.fuel_type}-${idx}`} style={styles.card}>
-                <div style={styles.cardTop}>
-                  <div>
-                    <div style={styles.symbol}>{item.fuel_type}</div>
-                    <div style={styles.meta}>{item.unit || "VND/liter"}</div>
+            <div style={styles.fuelBoard}>
+              <div style={styles.fuelHeader}>Giá xăng dầu hiện tại</div>
+              <div style={styles.fuelGrid}>
+                {fuelItems.map((item, idx) => (
+                  <div key={`${item.fuel_type}-${idx}`} style={styles.fuelCard}>
+                    <div style={styles.fuelName}>{item.fuel_type}</div>
+                    <div style={styles.fuelPrice}>{formatPrice(item.price)}</div>
+                    <div style={styles.fuelUnit}>{item.unit || "VND/liter"}</div>
+                    <div style={styles.fuelTime}>{formatDateTime(item.effective_time)}</div>
                   </div>
-                </div>
-
-                <div style={styles.grid}>
-                  <Metric title="Giá hiện tại" value={formatPrice(item.price)} />
-                  <Metric title="Hiệu lực" value={formatDateTime(item.effective_time)} />
-                </div>
+                ))}
               </div>
-            ))
+            </div>
           )
         ) : items.length === 0 ? (
           <div style={styles.empty}>Chưa có dữ liệu phù hợp</div>
         ) : (
           items.map((item, idx) => {
             const f = item.fundamental || {};
+
             return (
               <div key={`${item.symbol}-${idx}`} style={styles.card}>
                 <div style={styles.cardTop}>
@@ -266,7 +300,9 @@ export default function Home() {
                     <span style={styles.badgeBlue}>{item.setup_type}</span>
                   ) : null}
                   {item.confidence_score != null ? (
-                    <span style={styles.badgeGreen}>Conf {formatNum(item.confidence_score)}</span>
+                    <span style={styles.badgeGreen}>
+                      Conf {formatNum(item.confidence_score)}
+                    </span>
                   ) : null}
                 </div>
 
@@ -331,7 +367,9 @@ export default function Home() {
                       label="Vùng mua"
                       value={
                         item.entry_zone_low != null && item.entry_zone_high != null
-                          ? `${formatNum(item.entry_zone_low)} - ${formatNum(item.entry_zone_high)}`
+                          ? `${formatNum(item.entry_zone_low)} - ${formatNum(
+                              item.entry_zone_high
+                            )}`
                           : "-"
                       }
                     />
@@ -342,7 +380,11 @@ export default function Home() {
                     <TradeField label="R/R" value={formatNum(item.risk_reward_ratio)} />
                     <TradeField
                       label="Tỷ trọng"
-                      value={item.position_size_pct != null ? `${formatNum(item.position_size_pct)}%` : "-"}
+                      value={
+                        item.position_size_pct != null
+                          ? `${formatNum(item.position_size_pct)}%`
+                          : "-"
+                      }
                     />
                   </div>
                 </div>
@@ -424,6 +466,47 @@ function formatDateTime(value) {
       second: "2-digit",
     }) + " GMT+7"
   );
+}
+
+function formatGoldValue(value, unit) {
+  if (value == null || Number.isNaN(Number(value))) return "-";
+
+  if (unit === "VND/lượng") {
+    return `${(Number(value) / 1_000_000).toFixed(1)}M`;
+  }
+
+  return Number(value).toLocaleString("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+}
+
+function formatGoldChange(value, unit) {
+  if (value == null || Number.isNaN(Number(value))) return "";
+
+  if (unit === "VND/lượng") {
+    const sign = Number(value) > 0 ? "+" : "";
+    return `${sign}${(Number(value) / 1_000_000).toFixed(1)}M`;
+  }
+
+  const sign = Number(value) > 0 ? "+" : "";
+  return `${sign}${Number(value).toFixed(2)}`;
+}
+
+function getGoldPriceStyle(change) {
+  return change == null
+    ? styles.goldNeutral
+    : Number(change) >= 0
+    ? styles.goldUp
+    : styles.goldDown;
+}
+
+function getGoldChangeStyle(change) {
+  return change == null
+    ? styles.goldChangeNeutral
+    : Number(change) >= 0
+    ? styles.goldChangeUp
+    : styles.goldChangeDown;
 }
 
 function getActionStyle(action) {
@@ -811,5 +894,133 @@ const styles = {
     textAlign: "center",
     color: "#6b7280",
     boxShadow: "0 10px 30px rgba(0,0,0,0.06)",
+  },
+
+  goldBoard: {
+    background: "#0b0b0b",
+    borderRadius: 18,
+    padding: 18,
+    color: "#fff",
+  },
+  goldHeaderRow: {
+    display: "grid",
+    gridTemplateColumns: "1.4fr 1fr 1fr",
+    gap: 12,
+    marginBottom: 18,
+    color: "#a1a1aa",
+    fontWeight: 700,
+    fontSize: 16,
+  },
+  goldHeaderName: {},
+  goldHeaderPrice: {
+    textAlign: "right",
+  },
+  goldRow: {
+    display: "grid",
+    gridTemplateColumns: "1.4fr 1fr 1fr",
+    gap: 12,
+    padding: "18px 0",
+    borderTop: "1px solid rgba(255,255,255,0.08)",
+  },
+  goldNameCol: {},
+  goldName: {
+    fontSize: 26,
+    fontWeight: 800,
+    color: "#f8fafc",
+    lineHeight: 1.2,
+  },
+  goldSubtitle: {
+    marginTop: 8,
+    fontSize: 16,
+    color: "#a1a1aa",
+  },
+  goldPriceCol: {
+    textAlign: "right",
+  },
+  goldUp: {
+    fontSize: 28,
+    fontWeight: 800,
+    color: "#22c55e",
+  },
+  goldDown: {
+    fontSize: 28,
+    fontWeight: 800,
+    color: "#fb7185",
+  },
+  goldNeutral: {
+    fontSize: 28,
+    fontWeight: 800,
+    color: "#e5e7eb",
+  },
+  goldChangeUp: {
+    marginTop: 8,
+    fontSize: 18,
+    fontWeight: 700,
+    color: "#22c55e",
+  },
+  goldChangeDown: {
+    marginTop: 8,
+    fontSize: 18,
+    fontWeight: 700,
+    color: "#fb7185",
+  },
+  goldChangeNeutral: {
+    marginTop: 8,
+    fontSize: 18,
+    fontWeight: 700,
+    color: "#a1a1aa",
+  },
+  goldFooter: {
+    marginTop: 14,
+    paddingTop: 14,
+    borderTop: "1px solid rgba(255,255,255,0.08)",
+    color: "#a1a1aa",
+    fontSize: 13,
+  },
+
+  fuelBoard: {
+    background: "#fff",
+    borderRadius: 18,
+    padding: 18,
+    boxShadow: "0 10px 30px rgba(0,0,0,0.08)",
+  },
+  fuelHeader: {
+    fontSize: 18,
+    fontWeight: 800,
+    color: "#111827",
+    marginBottom: 14,
+  },
+  fuelGrid: {
+    display: "grid",
+    gridTemplateColumns: "1fr 1fr",
+    gap: 12,
+  },
+  fuelCard: {
+    background: "#f9fafb",
+    borderRadius: 14,
+    padding: 14,
+  },
+  fuelName: {
+    fontSize: 18,
+    fontWeight: 800,
+    color: "#111827",
+    marginBottom: 10,
+  },
+  fuelPrice: {
+    fontSize: 28,
+    fontWeight: 800,
+    color: "#16a34a",
+    lineHeight: 1.1,
+  },
+  fuelUnit: {
+    marginTop: 6,
+    fontSize: 13,
+    color: "#6b7280",
+  },
+  fuelTime: {
+    marginTop: 10,
+    fontSize: 12,
+    color: "#6b7280",
+    lineHeight: 1.4,
   },
 };
