@@ -12,11 +12,17 @@ export default function Home() {
   const [status, setStatus] = useState(null);
   const [jobStatus, setJobStatus] = useState(null);
   const [jobRunning, setJobRunning] = useState(false);
+  const [isMobile, setIsMobile] = useState(false);
 
   useEffect(() => {
     const saved =
       typeof window !== "undefined" ? localStorage.getItem("alpha-theme") : null;
     if (saved === "dark" || saved === "light") setTheme(saved);
+
+    const checkMobile = () => setIsMobile(window.innerWidth <= 768);
+    checkMobile();
+    window.addEventListener("resize", checkMobile);
+    return () => window.removeEventListener("resize", checkMobile);
   }, []);
 
   useEffect(() => {
@@ -34,7 +40,7 @@ export default function Home() {
   }, [mode]);
 
   const palette = useMemo(() => getPalette(theme), [theme]);
-  const styles = useMemo(() => createStyles(palette), [palette]);
+  const styles = useMemo(() => createStyles(palette, isMobile), [palette, isMobile]);
 
   const loadStatus = async () => {
     try {
@@ -114,7 +120,6 @@ export default function Home() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ symbol }),
       });
-
       await loadStocks();
 
       if (mode !== "watchlist") {
@@ -153,14 +158,12 @@ export default function Home() {
         target,
         status: "queued",
         progress: 5,
-        message: "Đang gửi lệnh chạy...",
+        message: "Đang gửi lệnh cập nhật...",
       });
 
       const res = await fetch("/api/run-update", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ target }),
       });
 
@@ -194,24 +197,24 @@ export default function Home() {
 
   return (
     <div style={styles.page}>
-      <div style={styles.bgGlow1} />
-      <div style={styles.bgGlow2} />
+      <div style={styles.glowTop} />
+      <div style={styles.glowBottom} />
 
       <div style={styles.container}>
         <section style={styles.heroCard}>
-          <div style={styles.heroHeader}>
-            <div style={styles.heroLeft}>
-              <div style={styles.eyebrow}>LCTA</div>
+          <div style={styles.heroTop}>
+            <div style={styles.brandBlock}>
+              <div style={styles.brandEyebrow}>LCTA</div>
               <h1 style={styles.heroTitle}>🚀 AlphaPulse Elite</h1>
-              <div style={styles.heroSubtitle}>
-                Trung tâm theo dõi cổ phiếu, vàng và xăng dầu với tín hiệu giao dịch,
-                vùng mua, cắt lỗ, chốt lời và nhịp cập nhật thị trường.
-              </div>
+              <p style={styles.heroSubtitle}>
+                Theo dõi cổ phiếu, vàng và xăng dầu với giao diện hiện đại, tín hiệu
+                rõ ràng và khả năng cập nhật dữ liệu nhanh ngay trên điện thoại.
+              </p>
             </div>
 
             <button
               onClick={() => setTheme(theme === "light" ? "dark" : "light")}
-              style={styles.themeIconBtn}
+              style={styles.themeButton}
               aria-label="Đổi giao diện"
               title="Đổi giao diện"
             >
@@ -219,41 +222,37 @@ export default function Home() {
             </button>
           </div>
 
-          <div style={styles.heroInfoGrid}>
-            <div style={styles.statusCard}>
-              <div style={styles.statusLabel}>Dữ liệu thị trường mới nhất</div>
-              <div style={styles.statusValue}>
-                {formatDateTime(status?.last_updated) || "Chưa có dữ liệu"}
-              </div>
-            </div>
-
-            <div style={styles.statusCard}>
-              <div style={styles.statusLabel}>GitHub update chạy lúc</div>
-              <div style={styles.statusValue}>
-                {formatDateTime(status?.github_update_at) || "Chưa có dữ liệu"}
-              </div>
-            </div>
+          <div style={styles.heroStats}>
+            <InfoCard
+              title="Dữ liệu thị trường mới nhất"
+              value={formatDateTime(status?.last_updated) || "Chưa có dữ liệu"}
+              styles={styles}
+            />
+            <InfoCard
+              title="GitHub update chạy lúc"
+              value={formatDateTime(status?.github_update_at) || "Chưa có dữ liệu"}
+              styles={styles}
+            />
           </div>
         </section>
 
-        <div style={styles.tabs}>
-          <TabButton active={mode === "stocks"} onClick={() => setMode("stocks")} label="📈 Cổ phiếu" styles={styles} />
-          <TabButton active={mode === "screener"} onClick={() => setMode("screener")} label="🧭 Screener" styles={styles} />
-          <TabButton active={mode === "watchlist"} onClick={() => setMode("watchlist")} label="⭐ Watchlist" styles={styles} />
-          <TabButton active={mode === "gold"} onClick={() => setMode("gold")} label="🥇 Giá vàng" styles={styles} />
-          <TabButton active={mode === "fuel"} onClick={() => setMode("fuel")} label="⛽ Giá xăng" styles={styles} />
+        <div style={styles.tabScroller}>
+          <div style={styles.tabs}>
+            <TabButton active={mode === "stocks"} onClick={() => setMode("stocks")} label="📈 Cổ phiếu" styles={styles} />
+            <TabButton active={mode === "screener"} onClick={() => setMode("screener")} label="🧭 Screener" styles={styles} />
+            <TabButton active={mode === "watchlist"} onClick={() => setMode("watchlist")} label="⭐ Watchlist" styles={styles} />
+            <TabButton active={mode === "gold"} onClick={() => setMode("gold")} label="🥇 Giá vàng" styles={styles} />
+            <TabButton active={mode === "fuel"} onClick={() => setMode("fuel")} label="⛽ Giá xăng" styles={styles} />
+          </div>
         </div>
 
         {mode === "watchlist" ? (
-          <section style={styles.panel}>
-            <div style={styles.panelHeader}>
-              <div>
-                <div style={styles.panelTitle}>⭐ Quản lý watchlist</div>
-                <div style={styles.panelDesc}>
-                  Thêm hoặc xóa mã để cá nhân hóa danh sách theo dõi.
-                </div>
-              </div>
-            </div>
+          <section style={styles.sectionCard}>
+            <SectionHeader
+              title="⭐ Watchlist cá nhân"
+              desc="Thêm và xóa mã theo dõi để cá nhân hóa danh mục."
+              styles={styles}
+            />
 
             <div style={styles.watchToolbar}>
               <input
@@ -262,7 +261,7 @@ export default function Home() {
                 placeholder="Nhập mã, ví dụ FPT"
                 style={styles.input}
               />
-              <button onClick={addStock} style={styles.primaryBtn}>
+              <button onClick={addStock} style={styles.primaryButton}>
                 Thêm mã
               </button>
             </div>
@@ -272,18 +271,14 @@ export default function Home() {
                 <div style={styles.emptyInline}>Chưa có mã nào trong watchlist.</div>
               ) : (
                 stocks.map((s, idx) => (
-                  <div key={`${s.symbol}-${idx}`} style={styles.watchItem}>
-                    <span style={styles.watchSymbol}>{s.symbol}</span>
-                    <button onClick={() => removeStock(s.symbol)} style={styles.removeBtn}>
+                  <div key={`${s.symbol}-${idx}`} style={styles.watchChip}>
+                    <span>{s.symbol}</span>
+                    <button onClick={() => removeStock(s.symbol)} style={styles.removeButton}>
                       ×
                     </button>
                   </div>
                 ))
               )}
-            </div>
-
-            <div style={styles.noteHint}>
-              Sau khi thêm hoặc xóa mã, chạy lại workflow cập nhật để làm mới dữ liệu.
             </div>
           </section>
         ) : loading ? (
@@ -292,51 +287,48 @@ export default function Home() {
           goldItems.length === 0 ? (
             <div style={styles.emptyCard}>Chưa có dữ liệu giá vàng.</div>
           ) : (
-            <section style={styles.panel}>
-              <div style={styles.panelHeader}>
-                <div>
-                  <div style={styles.panelTitle}>🥇 Bảng giá vàng nổi bật</div>
-                  <div style={styles.panelDesc}>
-                    Theo dõi nhanh vàng miếng SJC, vàng nhẫn 9999 và vàng thế giới.
-                  </div>
-                </div>
-              </div>
+            <section style={styles.sectionCard}>
+              <SectionHeader
+                title="🥇 Bảng giá vàng nổi bật"
+                desc="Theo dõi nhanh vàng miếng SJC, vàng nhẫn 9999 và vàng thế giới."
+                styles={styles}
+              />
 
-              <div style={styles.goldBoard}>
-                <div style={styles.goldHeaderRow}>
-                  <div style={styles.goldHeaderName}>Tên</div>
-                  <div style={styles.goldHeaderPrice}>Mua vào</div>
-                  <div style={styles.goldHeaderPrice}>Bán ra</div>
-                </div>
-
+              <div style={styles.goldList}>
                 {goldItems.map((item, idx) => (
-                  <div key={`${item.gold_type}-${idx}`} style={styles.goldRow}>
-                    <div style={styles.goldNameCol}>
-                      <div style={styles.goldName}>{item.display_name || item.gold_type}</div>
-                      <div style={styles.goldSubtitle}>{item.subtitle || item.source}</div>
-                    </div>
-
-                    <div style={styles.goldPriceCol}>
-                      <div style={styles.goldValue}>
-                        {formatGoldValue(item.buy_price, item.unit)}
-                      </div>
-                      <div style={getGoldChangeStyle(item.change_buy, styles, item.unit)}>
-                        {formatGoldChange(item.change_buy, item.unit)}
+                  <div key={`${item.gold_type}-${idx}`} style={styles.goldItem}>
+                    <div style={styles.goldItemTop}>
+                      <div style={styles.goldTitleWrap}>
+                        <div style={styles.goldName}>{item.display_name || item.gold_type}</div>
+                        <div style={styles.goldSubtitle}>{item.subtitle || item.source}</div>
                       </div>
                     </div>
 
-                    <div style={styles.goldPriceCol}>
-                      <div style={styles.goldValue}>
-                        {formatGoldValue(item.sell_price, item.unit)}
+                    <div style={styles.goldPriceGrid}>
+                      <div style={styles.pricePanel}>
+                        <div style={styles.priceLabel}>Mua vào</div>
+                        <div style={styles.priceValue}>
+                          {formatGoldValue(item.buy_price, item.unit)}
+                        </div>
+                        <div style={getGoldChangeStyle(item.change_buy, styles, item.unit)}>
+                          {formatGoldChange(item.change_buy, item.unit)}
+                        </div>
                       </div>
-                      <div style={getGoldChangeStyle(item.change_sell, styles, item.unit)}>
-                        {formatGoldChange(item.change_sell, item.unit)}
+
+                      <div style={styles.pricePanel}>
+                        <div style={styles.priceLabel}>Bán ra</div>
+                        <div style={styles.priceValue}>
+                          {formatGoldValue(item.sell_price, item.unit)}
+                        </div>
+                        <div style={getGoldChangeStyle(item.change_sell, styles, item.unit)}>
+                          {formatGoldChange(item.change_sell, item.unit)}
+                        </div>
                       </div>
                     </div>
                   </div>
                 ))}
 
-                <div style={styles.goldFooter}>
+                <div style={styles.dataFoot}>
                   <div>
                     Giá từ nguồn:{" "}
                     {formatDateTime(goldItems[0]?.price_time) || "Chưa có dữ liệu"}
@@ -354,20 +346,17 @@ export default function Home() {
           fuelItems.length === 0 ? (
             <div style={styles.emptyCard}>Chưa có dữ liệu giá xăng dầu.</div>
           ) : (
-            <section style={styles.panel}>
-              <div style={styles.panelHeader}>
-                <div>
-                  <div style={styles.panelTitle}>⛽ Giá xăng dầu hiện tại</div>
-                  <div style={styles.panelDesc}>
-                    Sắp xếp ưu tiên RON95, sau đó E5/E10, rồi Diesel và Dầu hỏa.
-                  </div>
-                </div>
-              </div>
+            <section style={styles.sectionCard}>
+              <SectionHeader
+                title="⛽ Giá xăng dầu hiện tại"
+                desc="Sắp xếp ưu tiên RON95, rồi E5/E10, Diesel và Dầu hỏa."
+                styles={styles}
+              />
 
               <div style={styles.fuelGrid}>
                 {fuelItems.map((item, idx) => (
                   <div key={`${item.fuel_type}-${idx}`} style={styles.fuelCard}>
-                    <div style={styles.fuelTop}>
+                    <div style={styles.fuelHead}>
                       <div style={styles.fuelIcon}>{getFuelIcon(item.fuel_type)}</div>
                       <div style={styles.fuelBadge}>{getFuelBadge(item.fuel_type)}</div>
                     </div>
@@ -383,31 +372,31 @@ export default function Home() {
         ) : items.length === 0 ? (
           <div style={styles.emptyCard}>Chưa có dữ liệu phù hợp.</div>
         ) : (
-          <div style={styles.cardsWrap}>
+          <div style={styles.stockGrid}>
             {items.map((item, idx) => {
               const f = item.fundamental || {};
 
               return (
                 <article key={`${item.symbol}-${idx}`} style={styles.stockCard}>
-                  <div style={styles.stockTop}>
+                  <div style={styles.stockHeader}>
                     <div>
                       <div style={styles.stockSymbol}>{item.symbol}</div>
-                      {f.industry ? <div style={styles.stockMeta}>{f.industry}</div> : null}
+                      {f.industry ? <div style={styles.stockIndustry}>{f.industry}</div> : null}
                     </div>
 
-                    <div style={styles.scoreCard}>
-                      <div style={styles.scoreLabel}>Score</div>
-                      <div style={styles.scoreValue}>{formatNum(item.total_score)}</div>
+                    <div style={styles.scoreBox}>
+                      <div style={styles.scoreText}>Score</div>
+                      <div style={styles.scoreNumber}>{formatNum(item.total_score)}</div>
                     </div>
                   </div>
 
-                  <div style={styles.signalBar}>
+                  <div style={styles.signalRow}>
                     <span style={getActionStyle(item.signal_action, styles)}>
                       {item.signal_action || "WATCH"}
                     </span>
 
                     {item.signal_strength ? (
-                      <span style={styles.badgeNeutral}>{item.signal_strength}</span>
+                      <span style={styles.badgeSoft}>{item.signal_strength}</span>
                     ) : null}
 
                     {item.setup_type ? (
@@ -421,9 +410,8 @@ export default function Home() {
                     ) : null}
                   </div>
 
-                  <div style={styles.metricGrid}>
+                  <div style={styles.metricsGrid}>
                     <Metric title="Giá" value={formatNum(item.close)} styles={styles} />
-
                     <Metric
                       title="RSI"
                       value={formatNum(item.rsi)}
@@ -439,18 +427,16 @@ export default function Home() {
                           ? "#dc2626"
                           : item.rsi <= 30
                           ? "#16a34a"
-                          : palette.textStrong
+                          : undefined
                       }
                       styles={styles}
                     />
-
                     <Metric
                       title="MA"
                       value={`20: ${formatNum(item.ma20)}`}
                       sub={`50: ${formatNum(item.ma50)} · 100: ${formatNum(item.ma100)}`}
                       styles={styles}
                     />
-
                     <Metric
                       title="MACD"
                       value={formatNum(item.macd)}
@@ -458,14 +444,12 @@ export default function Home() {
                       color={Number(item.macd || 0) >= 0 ? "#16a34a" : "#dc2626"}
                       styles={styles}
                     />
-
                     <Metric
                       title="Volume"
                       value={formatNum(item.volume_ratio)}
                       sub={`MA20: ${formatNum(item.volume_ma20)}`}
                       styles={styles}
                     />
-
                     <Metric
                       title="Breakout"
                       value={item.breakout_55 ? "55 phiên" : item.breakout_20 ? "20 phiên" : "-"}
@@ -474,19 +458,19 @@ export default function Home() {
                     />
                   </div>
 
-                  <div style={styles.badgesRow}>
+                  <div style={styles.tagRow}>
                     {item.bullish_ma ? <span style={styles.badgeGreen}>MA+</span> : null}
                     {item.bullish_macd ? <span style={styles.badgeBlue}>MACD+</span> : null}
                     {item.breakout_20 ? <span style={styles.badgeOrange}>BO20</span> : null}
                     {item.breakout_55 ? <span style={styles.badgeRed}>BO55</span> : null}
                     {item.price_action && item.price_action !== "neutral" ? (
-                      <span style={styles.badgeNeutral}>{item.price_action}</span>
+                      <span style={styles.badgeSoft}>{item.price_action}</span>
                     ) : null}
                   </div>
 
-                  <div style={styles.tradeBox}>
-                    <div style={styles.boxTitle}>Kế hoạch giao dịch</div>
-                    <div style={styles.tradeGrid}>
+                  <div style={styles.planCard}>
+                    <div style={styles.blockTitle}>Kế hoạch giao dịch</div>
+                    <div style={styles.planGrid}>
                       <TradeField label="Điểm vào" value={formatNum(item.entry_price)} styles={styles} />
                       <TradeField
                         label="Vùng mua"
@@ -511,20 +495,20 @@ export default function Home() {
                   </div>
 
                   {item.expert_strategy_note ? (
-                    <div style={styles.noteBox}>
-                      <div style={styles.boxTitle}>Nhận định chuyên gia</div>
+                    <div style={styles.noteCard}>
+                      <div style={styles.blockTitle}>Nhận định chuyên gia</div>
                       <div style={styles.noteText}>{item.expert_strategy_note}</div>
                     </div>
                   ) : item.expert_note ? (
-                    <div style={styles.noteBox}>
-                      <div style={styles.boxTitle}>Nhận định</div>
+                    <div style={styles.noteCard}>
+                      <div style={styles.blockTitle}>Nhận định</div>
                       <div style={styles.noteText}>{item.expert_note}</div>
                     </div>
                   ) : null}
 
                   {f.pe != null || f.pb != null || f.roe != null ? (
-                    <div style={styles.fundBox}>
-                      <div style={styles.boxTitle}>Cơ bản</div>
+                    <div style={styles.fundCard}>
+                      <div style={styles.blockTitle}>Cơ bản</div>
                       <div style={styles.fundRow}>
                         <span>PE: {formatNum(f.pe)}</span>
                         <span>PB: {formatNum(f.pb)}</span>
@@ -538,34 +522,31 @@ export default function Home() {
           </div>
         )}
 
-        <section style={styles.panel}>
-          <div style={styles.panelHeader}>
-            <div>
-              <div style={styles.panelTitle}>⚙️ Cập nhật dữ liệu</div>
-              <div style={styles.panelDesc}>
-                Chạy cập nhật thủ công cho cổ phiếu, vàng, xăng hoặc toàn bộ hệ thống.
-              </div>
-            </div>
-          </div>
+        <section style={styles.sectionCard}>
+          <SectionHeader
+            title="⚙️ Cập nhật dữ liệu"
+            desc="Chạy cập nhật thủ công cho cổ phiếu, vàng, xăng hoặc toàn bộ hệ thống."
+            styles={styles}
+          />
 
-          <div style={styles.updateActionBar}>
-            <button style={styles.updateBtn} onClick={() => runUpdate("stocks")} disabled={jobRunning}>
+          <div style={styles.updateButtons}>
+            <button style={styles.secondaryButton} onClick={() => runUpdate("stocks")} disabled={jobRunning}>
               🔄 Cập nhật cổ phiếu
             </button>
-            <button style={styles.updateBtn} onClick={() => runUpdate("gold")} disabled={jobRunning}>
+            <button style={styles.secondaryButton} onClick={() => runUpdate("gold")} disabled={jobRunning}>
               🥇 Cập nhật vàng
             </button>
-            <button style={styles.updateBtn} onClick={() => runUpdate("fuel")} disabled={jobRunning}>
+            <button style={styles.secondaryButton} onClick={() => runUpdate("fuel")} disabled={jobRunning}>
               ⛽ Cập nhật xăng
             </button>
-            <button style={styles.updateBtnPrimary} onClick={() => runUpdate("all")} disabled={jobRunning}>
+            <button style={styles.primaryButton} onClick={() => runUpdate("all")} disabled={jobRunning}>
               ⚡ Cập nhật tất cả
             </button>
           </div>
 
           {jobStatus ? (
             <div style={styles.progressCard}>
-              <div style={styles.progressHeader}>
+              <div style={styles.progressHead}>
                 <div style={styles.progressTitle}>
                   {jobStatus.target === "stocks"
                     ? "Tiến trình cập nhật cổ phiếu"
@@ -575,9 +556,7 @@ export default function Home() {
                     ? "Tiến trình cập nhật xăng"
                     : "Tiến trình cập nhật toàn bộ"}
                 </div>
-                <div style={styles.progressPercent}>
-                  {Number(jobStatus.progress || 0)}%
-                </div>
+                <div style={styles.progressPercent}>{Number(jobStatus.progress || 0)}%</div>
               </div>
 
               <div style={styles.progressTrack}>
@@ -592,18 +571,33 @@ export default function Home() {
               <div style={styles.progressMessage}>
                 {jobStatus.message || "Đang xử lý..."}
               </div>
-
               <div style={styles.progressMeta}>
                 Trạng thái: <strong>{jobStatus.status || "queued"}</strong>
               </div>
             </div>
           ) : (
-            <div style={styles.emptyInline}>
-              Chưa có tiến trình cập nhật nào được hiển thị.
-            </div>
+            <div style={styles.emptyInline}>Chưa có tiến trình cập nhật nào được hiển thị.</div>
           )}
         </section>
       </div>
+    </div>
+  );
+}
+
+function InfoCard({ title, value, styles }) {
+  return (
+    <div style={styles.infoCard}>
+      <div style={styles.infoTitle}>{title}</div>
+      <div style={styles.infoValue}>{value}</div>
+    </div>
+  );
+}
+
+function SectionHeader({ title, desc, styles }) {
+  return (
+    <div style={styles.sectionHeader}>
+      <div style={styles.sectionTitle}>{title}</div>
+      <div style={styles.sectionDesc}>{desc}</div>
     </div>
   );
 }
@@ -685,7 +679,6 @@ function formatDateTime(value) {
   if (!value) return "";
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return "";
-
   return (
     d.toLocaleString("vi-VN", {
       timeZone: "Asia/Ho_Chi_Minh",
@@ -702,7 +695,6 @@ function formatDateTime(value) {
 
 function formatGoldValue(value, unit) {
   if (value == null || Number.isNaN(Number(value))) return "-";
-
   const num = Number(value);
 
   if (unit === "VND/lượng") {
@@ -762,59 +754,51 @@ function getActionStyle(action, styles) {
 function getPalette(theme) {
   if (theme === "dark") {
     return {
-      theme: "dark",
-      bg:
-        "radial-gradient(circle at top left, rgba(59,130,246,0.16), transparent 28%), radial-gradient(circle at top right, rgba(16,185,129,0.16), transparent 24%), #020617",
-      glow1: "rgba(59,130,246,0.14)",
-      glow2: "rgba(16,185,129,0.14)",
-      panel: "rgba(15,23,42,0.78)",
-      panelBorder: "rgba(148,163,184,0.16)",
-      textStrong: "#f8fafc",
+      bg: "#020617",
+      bg2: "#0f172a",
+      panel: "rgba(15,23,42,0.84)",
+      panelSolid: "#0f172a",
+      panelSoft: "#111827",
+      line: "rgba(148,163,184,0.14)",
+      text: "#f8fafc",
       textSoft: "#94a3b8",
-      surface: "#0f172a",
-      surfaceAlt: "#111827",
-      line: "#1f2937",
-      shadow: "rgba(2,6,23,0.42)",
-      tab: "rgba(15,23,42,0.8)",
-      tabText: "#e2e8f0",
-      card: "rgba(15,23,42,0.80)",
-      metric: "#111827",
+      primary: "#2563eb",
+      primary2: "#1d4ed8",
+      shadow: "rgba(2,6,23,0.45)",
+      glow1: "rgba(37,99,235,0.18)",
+      glow2: "rgba(16,185,129,0.16)",
     };
   }
 
   return {
-    theme: "light",
-    bg:
-      "radial-gradient(circle at top left, rgba(59,130,246,0.12), transparent 28%), radial-gradient(circle at top right, rgba(16,185,129,0.10), transparent 24%), #eef2f7",
-      glow1: "rgba(59,130,246,0.10)",
-      glow2: "rgba(16,185,129,0.10)",
-      panel: "rgba(255,255,255,0.82)",
-      panelBorder: "rgba(255,255,255,0.65)",
-      textStrong: "#0f172a",
-      textSoft: "#64748b",
-      surface: "#ffffff",
-      surfaceAlt: "#f8fafc",
-      line: "#e2e8f0",
-      shadow: "rgba(15,23,42,0.08)",
-      tab: "rgba(255,255,255,0.85)",
-      tabText: "#0f172a",
-      card: "rgba(255,255,255,0.82)",
-      metric: "#f8fafc",
-    };
+    bg: "#edf2f7",
+    bg2: "#f8fbff",
+    panel: "rgba(255,255,255,0.82)",
+    panelSolid: "#ffffff",
+    panelSoft: "#f8fafc",
+    line: "#e5e7eb",
+    text: "#0f172a",
+    textSoft: "#64748b",
+    primary: "#2563eb",
+    primary2: "#0f172a",
+    shadow: "rgba(15,23,42,0.08)",
+    glow1: "rgba(37,99,235,0.10)",
+    glow2: "rgba(16,185,129,0.10)",
+  };
 }
 
-function createStyles(p) {
+function createStyles(p, isMobile) {
   return {
     page: {
       minHeight: "100vh",
-      background: p.bg,
-      padding: 12,
+      background: `linear-gradient(180deg, ${p.bg2}, ${p.bg})`,
+      padding: isMobile ? 12 : 20,
       fontFamily:
         'Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
       position: "relative",
       overflowX: "hidden",
     },
-    bgGlow1: {
+    glowTop: {
       position: "fixed",
       width: 260,
       height: 260,
@@ -825,279 +809,293 @@ function createStyles(p) {
       left: -80,
       pointerEvents: "none",
     },
-    bgGlow2: {
+    glowBottom: {
       position: "fixed",
-      width: 240,
-      height: 240,
+      width: 260,
+      height: 260,
       borderRadius: "50%",
       background: p.glow2,
       filter: "blur(90px)",
-      top: 120,
+      bottom: -80,
       right: -80,
       pointerEvents: "none",
     },
     container: {
-      maxWidth: 1120,
+      maxWidth: 1140,
       margin: "0 auto",
       position: "relative",
       zIndex: 1,
     },
     heroCard: {
-      padding: 16,
-      borderRadius: 22,
       background: p.panel,
-      backdropFilter: "blur(14px)",
-      boxShadow: `0 20px 50px ${p.shadow}`,
-      border: `1px solid ${p.panelBorder}`,
-      marginBottom: 14,
+      border: `1px solid ${p.line}`,
+      borderRadius: isMobile ? 24 : 28,
+      padding: isMobile ? 16 : 22,
+      backdropFilter: "blur(16px)",
+      boxShadow: `0 24px 60px ${p.shadow}`,
+      marginBottom: 16,
     },
-    heroHeader: {
+    heroTop: {
       display: "flex",
       justifyContent: "space-between",
-      alignItems: "flex-start",
       gap: 12,
-      marginBottom: 14,
+      alignItems: "flex-start",
+      marginBottom: 16,
     },
-    heroLeft: {
+    brandBlock: {
       flex: 1,
       minWidth: 0,
     },
-    eyebrow: {
+    brandEyebrow: {
       fontSize: 11,
+      fontWeight: 900,
+      letterSpacing: 1.4,
       textTransform: "uppercase",
-      letterSpacing: 1.2,
       color: p.textSoft,
-      fontWeight: 800,
       marginBottom: 8,
     },
     heroTitle: {
       margin: 0,
-      fontSize: 34,
-      lineHeight: 1.05,
-      color: p.textStrong,
+      color: p.text,
       fontWeight: 900,
+      fontSize: isMobile ? 30 : 38,
+      lineHeight: 1.03,
     },
     heroSubtitle: {
-      marginTop: 10,
-      fontSize: 14,
-      lineHeight: 1.7,
+      margin: "10px 0 0 0",
       color: p.textSoft,
+      fontSize: isMobile ? 14 : 15,
+      lineHeight: 1.7,
       maxWidth: 760,
     },
-    themeIconBtn: {
-      width: 44,
-      height: 44,
-      minWidth: 44,
-      borderRadius: 14,
+    themeButton: {
+      width: isMobile ? 42 : 48,
+      height: isMobile ? 42 : 48,
+      minWidth: isMobile ? 42 : 48,
+      borderRadius: 16,
       border: `1px solid ${p.line}`,
-      background: p.surface,
-      color: p.textStrong,
-      fontSize: 20,
+      background: p.panelSolid,
+      color: p.text,
+      fontSize: isMobile ? 19 : 21,
       cursor: "pointer",
-      boxShadow: `0 12px 28px ${p.shadow}`,
+      boxShadow: `0 10px 24px ${p.shadow}`,
     },
-    heroInfoGrid: {
+    heroStats: {
       display: "grid",
-      gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+      gridTemplateColumns: isMobile ? "1fr" : "repeat(2, minmax(0, 1fr))",
       gap: 10,
     },
-    statusCard: {
-      padding: 14,
-      borderRadius: 18,
-      background: p.surface,
-      boxShadow: `0 12px 28px ${p.shadow}`,
+    infoCard: {
+      background: p.panelSolid,
       border: `1px solid ${p.line}`,
+      borderRadius: 18,
+      padding: isMobile ? 14 : 16,
+      boxShadow: `0 10px 24px ${p.shadow}`,
     },
-    statusLabel: {
-      fontSize: 12,
+    infoTitle: {
       color: p.textSoft,
       fontWeight: 700,
+      fontSize: 12,
       marginBottom: 6,
     },
-    statusValue: {
-      fontSize: 14,
-      color: p.textStrong,
-      fontWeight: 800,
-      lineHeight: 1.5,
+    infoValue: {
+      color: p.text,
+      fontWeight: 900,
+      fontSize: isMobile ? 14 : 15,
+      lineHeight: 1.55,
+      wordBreak: "break-word",
+    },
+    tabScroller: {
+      overflowX: "auto",
+      WebkitOverflowScrolling: "touch",
+      marginBottom: 16,
+      paddingBottom: 2,
     },
     tabs: {
       display: "flex",
       gap: 8,
-      flexWrap: "wrap",
-      marginBottom: 12,
+      width: "max-content",
     },
     tab: {
       border: `1px solid ${p.line}`,
-      background: p.tab,
-      color: p.tabText,
-      padding: "10px 13px",
-      borderRadius: 14,
+      background: p.panelSolid,
+      color: p.text,
+      padding: isMobile ? "11px 14px" : "11px 16px",
+      borderRadius: 16,
       cursor: "pointer",
       fontWeight: 800,
-      fontSize: 13,
-      boxShadow: `0 6px 16px ${p.shadow}`,
+      fontSize: isMobile ? 14 : 14,
+      whiteSpace: "nowrap",
+      boxShadow: `0 8px 18px ${p.shadow}`,
     },
     tabActive: {
       border: "1px solid transparent",
-      background: "linear-gradient(135deg, #2563eb, #0f172a)",
+      background: `linear-gradient(135deg, ${p.primary}, ${p.primary2})`,
       color: "#fff",
-      padding: "10px 13px",
-      borderRadius: 14,
+      padding: isMobile ? "11px 14px" : "11px 16px",
+      borderRadius: 16,
       cursor: "pointer",
-      fontWeight: 800,
-      fontSize: 13,
+      fontWeight: 900,
+      fontSize: isMobile ? 14 : 14,
+      whiteSpace: "nowrap",
       boxShadow: `0 12px 28px ${p.shadow}`,
     },
-    panel: {
+    sectionCard: {
       background: p.panel,
-      backdropFilter: "blur(12px)",
-      borderRadius: 22,
-      padding: 16,
-      boxShadow: `0 20px 50px ${p.shadow}`,
-      border: `1px solid ${p.panelBorder}`,
+      border: `1px solid ${p.line}`,
+      borderRadius: isMobile ? 24 : 28,
+      padding: isMobile ? 16 : 20,
+      backdropFilter: "blur(14px)",
+      boxShadow: `0 24px 60px ${p.shadow}`,
+      marginBottom: 16,
+    },
+    sectionHeader: {
       marginBottom: 14,
     },
-    panelHeader: {
-      display: "flex",
-      justifyContent: "space-between",
-      alignItems: "flex-start",
-      gap: 12,
-      marginBottom: 14,
-      flexWrap: "wrap",
-    },
-    panelTitle: {
-      fontSize: 20,
+    sectionTitle: {
+      color: p.text,
+      fontSize: isMobile ? 19 : 22,
       fontWeight: 900,
-      color: p.textStrong,
       marginBottom: 6,
     },
-    panelDesc: {
+    sectionDesc: {
       color: p.textSoft,
-      fontSize: 13,
-      lineHeight: 1.6,
+      fontSize: isMobile ? 14 : 14,
+      lineHeight: 1.65,
+    },
+    emptyCard: {
+      background: p.panel,
+      borderRadius: 24,
+      padding: 28,
+      color: p.textSoft,
+      textAlign: "center",
+      boxShadow: `0 18px 40px ${p.shadow}`,
+      border: `1px solid ${p.line}`,
+    },
+    emptyInline: {
+      color: p.textSoft,
+      fontSize: 14,
     },
     watchToolbar: {
-      display: "flex",
+      display: "grid",
+      gridTemplateColumns: isMobile ? "1fr" : "1fr auto",
       gap: 10,
       marginBottom: 14,
-      flexWrap: "wrap",
     },
     input: {
-      flex: 1,
-      minWidth: 220,
-      padding: 14,
-      borderRadius: 14,
+      width: "100%",
+      padding: "14px 16px",
+      borderRadius: 16,
       border: `1px solid ${p.line}`,
-      fontSize: 14,
-      background: p.surface,
-      color: p.textStrong,
+      fontSize: 15,
+      background: p.panelSolid,
+      color: p.text,
       outline: "none",
+      boxSizing: "border-box",
     },
-    primaryBtn: {
-      padding: "14px 18px",
-      borderRadius: 14,
+    primaryButton: {
       border: "none",
-      background: "linear-gradient(135deg, #2563eb, #0f172a)",
+      background: `linear-gradient(135deg, ${p.primary}, ${p.primary2})`,
       color: "#fff",
-      fontWeight: 800,
+      padding: "13px 16px",
+      borderRadius: 16,
+      fontWeight: 900,
+      fontSize: 14,
       cursor: "pointer",
       boxShadow: `0 12px 28px ${p.shadow}`,
+      whiteSpace: "nowrap",
+    },
+    secondaryButton: {
+      border: `1px solid ${p.line}`,
+      background: p.panelSolid,
+      color: p.text,
+      padding: "13px 16px",
+      borderRadius: 16,
+      fontWeight: 800,
+      fontSize: 14,
+      cursor: "pointer",
+      boxShadow: `0 8px 18px ${p.shadow}`,
+      whiteSpace: "nowrap",
     },
     watchGrid: {
       display: "flex",
       flexWrap: "wrap",
       gap: 10,
     },
-    watchItem: {
+    watchChip: {
       display: "flex",
       alignItems: "center",
       gap: 8,
-      background: p.theme === "dark" ? "#172554" : "#eff6ff",
-      color: p.theme === "dark" ? "#93c5fd" : "#1d4ed8",
+      background: p.panelSolid,
+      color: p.text,
       padding: "10px 14px",
       borderRadius: 999,
       fontWeight: 800,
+      border: `1px solid ${p.line}`,
     },
-    watchSymbol: {
-      lineHeight: 1,
-    },
-    removeBtn: {
+    removeButton: {
       border: "none",
       background: "transparent",
       color: "#dc2626",
       fontSize: 18,
-      fontWeight: 900,
-      cursor: "pointer",
       lineHeight: 1,
+      cursor: "pointer",
+      fontWeight: 900,
+      padding: 0,
     },
-    noteHint: {
-      marginTop: 12,
-      fontSize: 12,
-      color: p.textSoft,
-    },
-    emptyCard: {
-      background: p.panel,
-      borderRadius: 22,
-      padding: 26,
-      color: p.textSoft,
-      textAlign: "center",
-      boxShadow: `0 20px 50px ${p.shadow}`,
-    },
-    emptyInline: {
-      color: p.textSoft,
-      fontSize: 14,
-    },
-    cardsWrap: {
+    stockGrid: {
       display: "grid",
-      gap: 14,
+      gap: 16,
     },
     stockCard: {
-      background: p.card,
-      backdropFilter: "blur(12px)",
-      borderRadius: 22,
-      padding: 16,
+      background: p.panel,
+      border: `1px solid ${p.line}`,
+      borderRadius: 24,
+      padding: isMobile ? 16 : 18,
       boxShadow: `0 20px 50px ${p.shadow}`,
-      border: `1px solid ${p.panelBorder}`,
+      backdropFilter: "blur(12px)",
     },
-    stockTop: {
+    stockHeader: {
       display: "flex",
       justifyContent: "space-between",
+      alignItems: "flex-start",
       gap: 12,
       marginBottom: 14,
-      flexWrap: "wrap",
     },
     stockSymbol: {
-      fontSize: 26,
+      color: p.text,
+      fontSize: isMobile ? 22 : 28,
       fontWeight: 900,
-      color: p.textStrong,
+      lineHeight: 1.05,
     },
-    stockMeta: {
+    stockIndustry: {
       marginTop: 6,
-      fontSize: 13,
       color: p.textSoft,
+      fontSize: 13,
     },
-    scoreCard: {
-      padding: "10px 14px",
-      minWidth: 92,
+    scoreBox: {
+      minWidth: isMobile ? 88 : 96,
+      padding: "10px 12px",
       borderRadius: 18,
-      background: p.surfaceAlt,
+      background: p.panelSolid,
       border: `1px solid ${p.line}`,
       textAlign: "right",
     },
-    scoreLabel: {
-      fontSize: 11,
+    scoreText: {
       color: p.textSoft,
+      fontSize: 11,
       fontWeight: 700,
     },
-    scoreValue: {
-      fontSize: 28,
+    scoreNumber: {
+      color: p.text,
+      fontSize: isMobile ? 26 : 30,
       fontWeight: 900,
-      color: p.textStrong,
+      lineHeight: 1.1,
     },
-    signalBar: {
+    signalRow: {
       display: "flex",
-      gap: 8,
       flexWrap: "wrap",
+      gap: 8,
       marginBottom: 14,
     },
     actionBuy: {
@@ -1105,7 +1103,7 @@ function createStyles(p) {
       color: "#166534",
       padding: "7px 11px",
       borderRadius: 999,
-      fontWeight: 800,
+      fontWeight: 900,
       fontSize: 12,
     },
     actionHold: {
@@ -1113,7 +1111,7 @@ function createStyles(p) {
       color: "#1d4ed8",
       padding: "7px 11px",
       borderRadius: 999,
-      fontWeight: 800,
+      fontWeight: 900,
       fontSize: 12,
     },
     actionWatch: {
@@ -1121,7 +1119,7 @@ function createStyles(p) {
       color: "#92400e",
       padding: "7px 11px",
       borderRadius: 999,
-      fontWeight: 800,
+      fontWeight: 900,
       fontSize: 12,
     },
     actionTp: {
@@ -1129,7 +1127,7 @@ function createStyles(p) {
       color: "#c2410c",
       padding: "7px 11px",
       borderRadius: 999,
-      fontWeight: 800,
+      fontWeight: 900,
       fontSize: 12,
     },
     actionSell: {
@@ -1137,7 +1135,7 @@ function createStyles(p) {
       color: "#b91c1c",
       padding: "7px 11px",
       borderRadius: 999,
-      fontWeight: 800,
+      fontWeight: 900,
       fontSize: 12,
     },
     badgeGreen: {
@@ -1172,209 +1170,220 @@ function createStyles(p) {
       fontWeight: 800,
       fontSize: 12,
     },
-    badgeNeutral: {
-      background: p.theme === "dark" ? "#1e293b" : "#f1f5f9",
-      color: p.theme === "dark" ? "#cbd5e1" : "#334155",
+    badgeSoft: {
+      background: p.panelSolid,
+      color: p.textSoft,
       padding: "7px 11px",
       borderRadius: 999,
       fontWeight: 800,
       fontSize: 12,
+      border: `1px solid ${p.line}`,
     },
-    metricGrid: {
+    metricsGrid: {
       display: "grid",
-      gridTemplateColumns: "repeat(auto-fit, minmax(138px, 1fr))",
+      gridTemplateColumns: isMobile ? "repeat(2, minmax(0, 1fr))" : "repeat(3, minmax(0, 1fr))",
       gap: 10,
     },
     metricCard: {
-      background: p.metric,
-      borderRadius: 16,
-      padding: 14,
+      background: p.panelSolid,
       border: `1px solid ${p.line}`,
+      borderRadius: 18,
+      padding: isMobile ? 12 : 14,
+      minWidth: 0,
     },
     metricTitle: {
-      fontSize: 12,
       color: p.textSoft,
+      fontSize: 12,
       fontWeight: 700,
       marginBottom: 8,
     },
     metricValue: {
-      fontSize: 26,
+      color: p.text,
+      fontSize: isMobile ? 22 : 26,
       fontWeight: 900,
       lineHeight: 1.1,
-      color: p.textStrong,
+      wordBreak: "break-word",
     },
     metricSub: {
       marginTop: 6,
-      fontSize: 12,
       color: p.textSoft,
-      lineHeight: 1.5,
+      fontSize: 12,
+      lineHeight: 1.45,
+      wordBreak: "break-word",
     },
-    badgesRow: {
+    tagRow: {
       display: "flex",
       flexWrap: "wrap",
       gap: 8,
       marginTop: 14,
     },
-    tradeBox: {
+    planCard: {
       marginTop: 14,
-      background:
-        p.theme === "dark"
-          ? "linear-gradient(180deg, rgba(30,41,59,0.9), rgba(15,23,42,0.9))"
-          : "linear-gradient(180deg, #eff6ff, #f8fbff)",
-      borderRadius: 18,
-      padding: 14,
+      background: p.panelSolid,
       border: `1px solid ${p.line}`,
+      borderRadius: 20,
+      padding: 14,
     },
-    boxTitle: {
+    blockTitle: {
+      color: p.text,
       fontSize: 13,
-      fontWeight: 800,
-      color: p.textStrong,
+      fontWeight: 900,
       marginBottom: 10,
     },
-    tradeGrid: {
+    planGrid: {
       display: "grid",
-      gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))",
+      gridTemplateColumns: isMobile ? "repeat(2, minmax(0, 1fr))" : "repeat(4, minmax(0, 1fr))",
       gap: 10,
     },
     tradeField: {
-      background: p.surface,
-      borderRadius: 14,
-      padding: 12,
+      background: p.panelSoft,
       border: `1px solid ${p.line}`,
+      borderRadius: 16,
+      padding: 12,
+      minWidth: 0,
     },
     tradeLabel: {
-      fontSize: 12,
       color: p.textSoft,
-      marginBottom: 6,
+      fontSize: 12,
       fontWeight: 700,
+      marginBottom: 6,
     },
     tradeValue: {
-      fontSize: 16,
+      color: p.text,
+      fontSize: 15,
       fontWeight: 800,
-      color: p.textStrong,
+      lineHeight: 1.4,
+      wordBreak: "break-word",
     },
-    noteBox: {
+    noteCard: {
       marginTop: 14,
-      background: p.surfaceAlt,
-      borderRadius: 18,
-      padding: 14,
+      background: p.panelSolid,
       border: `1px solid ${p.line}`,
+      borderRadius: 20,
+      padding: 14,
     },
     noteText: {
+      color: p.text,
       fontSize: 14,
-      color: p.textStrong,
-      lineHeight: 1.65,
+      lineHeight: 1.7,
     },
-    fundBox: {
+    fundCard: {
       marginTop: 14,
-      background: p.surfaceAlt,
-      borderRadius: 18,
-      padding: 14,
+      background: p.panelSolid,
       border: `1px solid ${p.line}`,
+      borderRadius: 20,
+      padding: 14,
     },
     fundRow: {
       display: "flex",
-      gap: 14,
       flexWrap: "wrap",
-      color: p.textStrong,
-      fontWeight: 700,
+      gap: 14,
+      color: p.text,
       fontSize: 13,
-    },
-    goldBoard: {
-      background: p.surface,
-      borderRadius: 22,
-      padding: 16,
-      border: `1px solid ${p.line}`,
-      boxShadow: `0 16px 40px ${p.shadow}`,
-    },
-    goldHeaderRow: {
-      display: "grid",
-      gridTemplateColumns: "1.15fr 1fr 1fr",
-      gap: 10,
-      marginBottom: 14,
-      color: p.textSoft,
       fontWeight: 800,
-      fontSize: 14,
     },
-    goldHeaderName: {},
-    goldHeaderPrice: {
-      textAlign: "right",
-    },
-    goldRow: {
+    goldList: {
       display: "grid",
-      gridTemplateColumns: "1.15fr 1fr 1fr",
-      gap: 10,
-      padding: "16px 0",
-      borderTop: `1px solid ${p.line}`,
+      gap: 12,
     },
-    goldNameCol: {},
+    goldItem: {
+      background: p.panelSolid,
+      border: `1px solid ${p.line}`,
+      borderRadius: 22,
+      padding: isMobile ? 14 : 16,
+      boxShadow: `0 10px 24px ${p.shadow}`,
+    },
+    goldItemTop: {
+      marginBottom: 12,
+    },
+    goldTitleWrap: {
+      minWidth: 0,
+    },
     goldName: {
-      fontSize: 21,
+      color: p.text,
+      fontSize: isMobile ? 18 : 22,
       fontWeight: 900,
-      color: p.textStrong,
       lineHeight: 1.2,
     },
     goldSubtitle: {
-      marginTop: 8,
-      fontSize: 14,
+      marginTop: 6,
       color: p.textSoft,
+      fontSize: isMobile ? 13 : 14,
+      lineHeight: 1.45,
     },
-    goldPriceCol: {
-      textAlign: "right",
+    goldPriceGrid: {
+      display: "grid",
+      gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+      gap: 10,
     },
-    goldValue: {
-      fontSize: 25,
+    pricePanel: {
+      background: p.panelSoft,
+      border: `1px solid ${p.line}`,
+      borderRadius: 18,
+      padding: isMobile ? 12 : 14,
+      minWidth: 0,
+    },
+    priceLabel: {
+      color: p.textSoft,
+      fontSize: 12,
+      fontWeight: 700,
+      marginBottom: 8,
+    },
+    priceValue: {
+      color: p.text,
+      fontSize: isMobile ? 17 : 24,
       fontWeight: 900,
-      color: p.textStrong,
-      lineHeight: 1.15,
+      lineHeight: 1.18,
       wordBreak: "break-word",
+      letterSpacing: isMobile ? "-0.3px" : 0,
     },
     goldChangeUp: {
       marginTop: 6,
-      fontSize: 16,
-      fontWeight: 800,
       color: "#16a34a",
-      minHeight: 19,
+      fontSize: isMobile ? 14 : 16,
+      fontWeight: 900,
+      lineHeight: 1.25,
+      minHeight: 18,
+      wordBreak: "break-word",
     },
     goldChangeDown: {
       marginTop: 6,
-      fontSize: 16,
-      fontWeight: 800,
       color: "#dc2626",
-      minHeight: 19,
+      fontSize: isMobile ? 14 : 16,
+      fontWeight: 900,
+      lineHeight: 1.25,
+      minHeight: 18,
+      wordBreak: "break-word",
     },
     goldChangeNeutral: {
       marginTop: 6,
-      fontSize: 16,
+      color: p.textSoft,
+      fontSize: isMobile ? 14 : 16,
       fontWeight: 800,
-      color: p.textSoft,
-      minHeight: 19,
+      lineHeight: 1.25,
+      minHeight: 18,
     },
-    goldFooter: {
-      marginTop: 14,
-      paddingTop: 14,
-      borderTop: `1px solid ${p.line}`,
+    dataFoot: {
+      marginTop: 2,
       color: p.textSoft,
-      fontSize: 13,
-      display: "grid",
-      gap: 6,
+      fontSize: isMobile ? 12 : 13,
+      lineHeight: 1.6,
+      padding: "2px 2px 0 2px",
+      wordBreak: "break-word",
     },
     fuelGrid: {
       display: "grid",
-      gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))",
+      gridTemplateColumns: isMobile ? "1fr" : "repeat(auto-fit, minmax(220px, 1fr))",
       gap: 12,
     },
     fuelCard: {
-      background:
-        p.theme === "dark"
-          ? "linear-gradient(135deg, #0f172a, #111827)"
-          : "linear-gradient(135deg, #ffffff, #f8fbff)",
-      borderRadius: 20,
-      padding: 16,
+      background: p.panelSolid,
       border: `1px solid ${p.line}`,
-      boxShadow: `0 16px 40px ${p.shadow}`,
+      borderRadius: 22,
+      padding: 16,
+      boxShadow: `0 10px 24px ${p.shadow}`,
     },
-    fuelTop: {
+    fuelHead: {
       display: "flex",
       justifyContent: "space-between",
       alignItems: "center",
@@ -1385,88 +1394,69 @@ function createStyles(p) {
     },
     fuelBadge: {
       display: "inline-block",
-      padding: "5px 9px",
+      padding: "5px 10px",
       borderRadius: 999,
-      background: p.theme === "dark" ? "rgba(59,130,246,0.18)" : "#eef2ff",
-      color: p.theme === "dark" ? "#93c5fd" : "#4338ca",
+      background: p.panelSoft,
+      color: p.textSoft,
+      border: `1px solid ${p.line}`,
       fontSize: 11,
       fontWeight: 800,
     },
     fuelName: {
+      color: p.text,
       fontSize: 18,
       fontWeight: 900,
-      color: p.textStrong,
-      marginBottom: 10,
       lineHeight: 1.3,
+      marginBottom: 10,
     },
     fuelPrice: {
-      fontSize: 28,
-      fontWeight: 900,
       color: "#16a34a",
+      fontSize: 30,
+      fontWeight: 900,
       lineHeight: 1.1,
+      wordBreak: "break-word",
     },
     fuelUnit: {
       marginTop: 6,
-      fontSize: 13,
       color: p.textSoft,
+      fontSize: 13,
     },
     fuelTime: {
       marginTop: 10,
-      fontSize: 12,
       color: p.textSoft,
+      fontSize: 12,
       lineHeight: 1.5,
     },
-    updateActionBar: {
-      display: "flex",
-      gap: 8,
-      flexWrap: "wrap",
-      marginBottom: 12,
-    },
-    updateBtn: {
-      border: `1px solid ${p.line}`,
-      background: p.surface,
-      color: p.textStrong,
-      padding: "10px 13px",
-      borderRadius: 14,
-      fontWeight: 800,
-      cursor: "pointer",
-      fontSize: 13,
-    },
-    updateBtnPrimary: {
-      border: "none",
-      background: "linear-gradient(135deg, #2563eb, #0f172a)",
-      color: "#fff",
-      padding: "10px 13px",
-      borderRadius: 14,
-      fontWeight: 800,
-      cursor: "pointer",
-      fontSize: 13,
-      boxShadow: `0 12px 28px ${p.shadow}`,
+    updateButtons: {
+      display: "grid",
+      gridTemplateColumns: isMobile ? "1fr 1fr" : "repeat(4, max-content)",
+      gap: 10,
+      alignItems: "stretch",
     },
     progressCard: {
-      background: p.surface,
+      marginTop: 14,
+      background: p.panelSolid,
       border: `1px solid ${p.line}`,
-      boxShadow: `0 16px 40px ${p.shadow}`,
-      borderRadius: 18,
+      borderRadius: 20,
       padding: 14,
-      marginTop: 8,
+      boxShadow: `0 10px 24px ${p.shadow}`,
     },
-    progressHeader: {
+    progressHead: {
       display: "flex",
       justifyContent: "space-between",
-      alignItems: "center",
       gap: 10,
+      alignItems: "center",
       marginBottom: 10,
     },
     progressTitle: {
-      fontSize: 14,
-      fontWeight: 800,
-      color: p.textStrong,
-    },
-    progressPercent: {
+      color: p.text,
       fontSize: 14,
       fontWeight: 900,
-      color: "#2563eb",
+    },
+    progressPercent: {
+      color: p.primary,
+      fontSize: 14,
+      fontWeight: 900,
     },
     progressTrack: {
       width: "100%",
@@ -1478,20 +1468,21 @@ function createStyles(p) {
     progressBar: {
       height: "100%",
       borderRadius: 999,
-      background: "linear-gradient(90deg, #22c55e, #2563eb)",
+      background: `linear-gradient(90deg, #22c55e, ${p.primary})`,
       transition: "width 0.35s ease",
     },
     progressMessage: {
       marginTop: 10,
+      color: p.text,
       fontSize: 13,
-      color: p.textStrong,
-      fontWeight: 700,
+      fontWeight: 800,
       wordBreak: "break-word",
+      lineHeight: 1.5,
     },
     progressMeta: {
       marginTop: 6,
-      fontSize: 12,
       color: p.textSoft,
+      fontSize: 12,
     },
   };
 }
