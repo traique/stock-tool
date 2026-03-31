@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 export default function Home() {
-  const [mode, setMode] = useState("dashboard");
+  const [mode, setMode] = useState("stocks");
   const [theme, setTheme] = useState("light");
   const [items, setItems] = useState([]);
   const [stocks, setStocks] = useState([]);
@@ -26,7 +26,7 @@ export default function Home() {
   }, [theme]);
 
   const endpoint = useMemo(() => {
-    if (mode === "dashboard") return "/api/prices";
+    if (mode === "stocks") return "/api/prices";
     if (mode === "screener") return "/api/screener";
     if (mode === "gold") return "/api/gold";
     if (mode === "fuel") return "/api/fuel";
@@ -201,7 +201,7 @@ export default function Home() {
         <section style={styles.heroCard}>
           <div style={styles.heroHeader}>
             <div style={styles.heroLeft}>
-              <div style={styles.eyebrow}>Hệ điều hành đầu tư cá nhân</div>
+              <div style={styles.eyebrow}>LCTA</div>
               <h1 style={styles.heroTitle}>🚀 AlphaPulse Elite</h1>
               <div style={styles.heroSubtitle}>
                 Trung tâm theo dõi cổ phiếu, vàng và xăng dầu với tín hiệu giao dịch,
@@ -237,7 +237,7 @@ export default function Home() {
         </section>
 
         <div style={styles.tabs}>
-          <TabButton active={mode === "dashboard"} onClick={() => setMode("dashboard")} label="📈 Dashboard" styles={styles} />
+          <TabButton active={mode === "stocks"} onClick={() => setMode("stocks")} label="📈 Cổ phiếu" styles={styles} />
           <TabButton active={mode === "screener"} onClick={() => setMode("screener")} label="🧭 Screener" styles={styles} />
           <TabButton active={mode === "watchlist"} onClick={() => setMode("watchlist")} label="⭐ Watchlist" styles={styles} />
           <TabButton active={mode === "gold"} onClick={() => setMode("gold")} label="🥇 Giá vàng" styles={styles} />
@@ -703,11 +703,13 @@ function formatDateTime(value) {
 function formatGoldValue(value, unit) {
   if (value == null || Number.isNaN(Number(value))) return "-";
 
+  const num = Number(value);
+
   if (unit === "VND/lượng") {
-    return `${(Number(value) / 1_000_000).toFixed(1)}M`;
+    return num.toLocaleString("vi-VN");
   }
 
-  return Number(value).toLocaleString("en-US", {
+  return num.toLocaleString("en-US", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   });
@@ -721,7 +723,7 @@ function formatGoldChange(value, unit) {
   if (unit === "VND/lượng") {
     if (Math.abs(num) < 1000) return "";
     const sign = num > 0 ? "+" : "-";
-    return `${sign}${(Math.abs(num) / 1_000_000).toFixed(1)}M`;
+    return `${sign}${Math.abs(Math.round(num)).toLocaleString("vi-VN")}`;
   }
 
   if (Math.abs(num) < 0.01) return "";
@@ -784,21 +786,21 @@ function getPalette(theme) {
     theme: "light",
     bg:
       "radial-gradient(circle at top left, rgba(59,130,246,0.12), transparent 28%), radial-gradient(circle at top right, rgba(16,185,129,0.10), transparent 24%), #eef2f7",
-    glow1: "rgba(59,130,246,0.10)",
-    glow2: "rgba(16,185,129,0.10)",
-    panel: "rgba(255,255,255,0.82)",
-    panelBorder: "rgba(255,255,255,0.65)",
-    textStrong: "#0f172a",
-    textSoft: "#64748b",
-    surface: "#ffffff",
-    surfaceAlt: "#f8fafc",
-    line: "#e2e8f0",
-    shadow: "rgba(15,23,42,0.08)",
-    tab: "rgba(255,255,255,0.85)",
-    tabText: "#0f172a",
-    card: "rgba(255,255,255,0.82)",
-    metric: "#f8fafc",
-  };
+      glow1: "rgba(59,130,246,0.10)",
+      glow2: "rgba(16,185,129,0.10)",
+      panel: "rgba(255,255,255,0.82)",
+      panelBorder: "rgba(255,255,255,0.65)",
+      textStrong: "#0f172a",
+      textSoft: "#64748b",
+      surface: "#ffffff",
+      surfaceAlt: "#f8fafc",
+      line: "#e2e8f0",
+      shadow: "rgba(15,23,42,0.08)",
+      tab: "rgba(255,255,255,0.85)",
+      tabText: "#0f172a",
+      card: "rgba(255,255,255,0.82)",
+      metric: "#f8fafc",
+    };
 }
 
 function createStyles(p) {
@@ -1324,6 +1326,8 @@ function createStyles(p) {
       fontSize: 25,
       fontWeight: 900,
       color: p.textStrong,
+      lineHeight: 1.15,
+      wordBreak: "break-word",
     },
     goldChangeUp: {
       marginTop: 6,
