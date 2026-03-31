@@ -8,8 +8,7 @@ from bs4 import BeautifulSoup
 
 DB_URL = os.environ["DB_URL"]
 
-SJC_URL = "https://giavang.org/trong-nuoc/sjc/"
-WORLD_URL = "https://giavang.org/the-gioi/"
+VANG_TODAY_URL = "https://vang.today/vi/"
 
 
 def log(message: str) -> None:
@@ -18,7 +17,7 @@ def log(message: str) -> None:
 
 def fetch_html(url: str) -> str:
     headers = {
-        "User-Agent": "Mozilla/5.0 (compatible; AlphaPulseEliteBot/1.0)",
+        "User-Agent": "Mozilla/5.0 (compatible; AlphaPulseEliteBot/2.0)",
         "Accept-Language": "vi-VN,vi;q=0.9,en;q=0.8",
         "Cache-Control": "no-cache",
         "Pragma": "no-cache",
@@ -34,111 +33,76 @@ def clean_text(value):
     return str(value).replace("\xa0", " ").strip()
 
 
-def parse_domestic_gold_to_vnd_per_luong(value):
-    """
-    Ví dụ:
-    170.8   -> 170,800,000
-    170,8   -> 170,800,000
-    170.800 -> 170,800,000
-    170800000 -> 170,800,000
-    """
-    raw = clean_text(value).replace(" ", "").replace(",", ".")
-    if not raw:
+def parse_vnd(value):
+    text = clean_text(value)
+    digits = re.sub(r"[^\d]", "", text)
+    if not digits:
         return None
-
-    m = re.search(r"\d+(?:\.\d+)?", raw)
-    if not m:
-        return None
-
-    number = float(m.group(0))
-
-    if number >= 100_000_000:
-        return int(round(number))
-
-    if 1000 <= number < 1_000_000:
-        return int(round(number * 1000))
-
-    return int(round(number * 1_000_000))
+    return int(digits)
 
 
-def parse_world_price(value):
-    raw = clean_text(value).replace(",", "")
-    m = re.search(r"\d+(?:\.\d+)?", raw)
+def parse_usd(value):
+    text = clean_text(value).replace(",", "")
+    m = re.search(r"\d+(?:\.\d+)?", text)
     if not m:
         return None
     return float(m.group(0))
 
 
-def parse_domestic_change_to_vnd(value):
-    """
-    Ví dụ:
-    +1M -> 1000000
-    -1M -> -1000000
-    +800,000 -> 800000
-    ▲ 800,000 -> 800000
-    ▼ 500,000 -> -500000
-    +0.8M -> 800000
-    """
-    text = clean_text(value).upper().replace(" ", "")
-    if not text:
-        return None
+def parse_vnd_change(value):
+    text = clean_text(value)
+    if not text or text in {"-", "./.", "-/-"}:
+        return 0
 
     sign = 1
-    if text.startswith("-") or "▼" in text:
+    if "↓" in text or text.strip().startswith("-"):
         sign = -1
-    elif text.startswith("+") or "▲" in text:
+    elif "↑" in text or text.strip().startswith("+"):
         sign = 1
 
-    text = text.replace("▲", "").replace("▼", "")
-    text = text.lstrip("+-")
-    text = text.replace(",", ".")
+    digits = re.sub(r"[^\d]", "", text)
+    if not digits:
+        return 0
 
-    m = re.search(r"(\d+(?:\.\d+)?)(M|K)?", text)
-    if not m:
-        return None
-
-    number = float(m.group(1))
-    unit = m.group(2) or ""
-
-    if unit == "M":
-        amount = int(round(number * 1_000_000))
-    elif unit == "K":
-        amount = int(round(number * 1_000))
-    else:
-        # nếu không có hậu tố thì thử hiểu theo số đầy đủ
-        # ví dụ 800000 hoặc 800.000
-        if number >= 100000:
-            amount = int(round(number))
-        elif number >= 1000:
-            amount = int(round(number))
-        else:
-            amount = int(round(number))
-
-    return sign * amount
+    return sign * int(digits)
 
 
-def parse_world_change(value):
-    """
-    Ví dụ:
-    +11.13
-    -8.52
-    tăng 11.13 USD
-    giảm 8.52 USD
-    """
-    text = clean_text(value).replace(",", "")
-    if not text:
-        return None
+def parse_usd_change(value):
+    text = clean_text(value)
+    if not text or text in {"-", ".", "./.", "-/-"}:
+        return 0.0
 
     sign = 1
-    lower = text.lower()
-    if text.startswith("-") or "giảm" in lower or "▼" in text:
+    if "↓" in text or text.strip().startswith("-"):
         sign = -1
+    elif "↑" in text or text.strip().startswith("+"):
+        sign = 1
 
-    m = re.search(r"(\d+(?:\.\d+)?)", text)
+    m = re.search(r"\d+(?:\.\d+)?", text.replace(",", ""))
     if not m:
-        return None
+        return 0.0
 
-    return sign * float(m.group(1))
+    return sign * float(m.group(0))
+
+
+def parse_price_time_vn(value: str):
+    text = clean_text(value)
+
+    # ví dụ: 15:30 19/03
+    m = re.search(r"(\d{2}):(\d{2})\s+(\d{2})/(\d{2})", text)
+    if not m:
+        return datetime.now(timezone.utc)
+
+    hour = int(m.group(1))
+    minute = int(m.group(2))
+    day = int(m.group(3))
+    month = int(m.group(4))
+    year = datetime.now().year
+
+    # đổi từ giờ VN sang UTC
+    dt_local = datetime(year, month, day, hour, minute)
+    dt_utc = dt_local.replace(tzinfo=timezone.utc).timestamp() - 7 * 3600
+    return datetime.fromtimestamp(dt_utc, tz=timezone.utc)
 
 
 def cleanup_bad_rows(cur):
@@ -256,148 +220,117 @@ def is_valid_row(row):
     return True
 
 
-def scrape_domestic_gold():
-    html = fetch_html(SJC_URL)
+def extract_text_blocks():
+    html = fetch_html(VANG_TODAY_URL)
     soup = BeautifulSoup(html, "lxml")
     text = soup.get_text("\n", strip=True)
-    now_utc = datetime.now(timezone.utc)
+    return text
 
-    rows = []
 
-    # Ưu tiên pattern có đủ: mua, bán, thay đổi mua, thay đổi bán
-    sjc_full = re.search(
-        r"Hồ Chí Minh\s+Vàng SJC 1L, 10L, 1KG\s+([\d\.,]+)\s+([\d\.,]+)\s+([+\-▲▼]?\s*[\d\.,]+(?:M|K)?)\s+([+\-▲▼]?\s*[\d\.,]+(?:M|K)?)",
+def scrape_world_gold(text: str):
+    # block gần đầu trang:
+    # XAU/USD
+    # $4,675.10
+    # ↓ -206.50
+    world_match = re.search(
+        r"XAU/USD\s+\$?([\d,]+\.\d+)\s+([↑↓]?\s*[+\-]?\s*[\d,]+(?:\.\d+)?)",
         text,
         flags=re.IGNORECASE,
     )
-    ring_full = re.search(
-        r"Hồ Chí Minh\s+.*?Vàng nhẫn SJC 99,99% 1 chỉ, 2 chỉ, 5 chỉ\s+([\d\.,]+)\s+([\d\.,]+)\s+([+\-▲▼]?\s*[\d\.,]+(?:M|K)?)\s+([+\-▲▼]?\s*[\d\.,]+(?:M|K)?)",
-        text,
-        flags=re.IGNORECASE | re.DOTALL,
-    )
 
-    # Fallback chỉ có mua, bán
-    sjc_basic = re.search(
-        r"Hồ Chí Minh\s+Vàng SJC 1L, 10L, 1KG\s+([\d\.,]+)\s+([\d\.,]+)",
-        text,
-        flags=re.IGNORECASE,
-    )
-    ring_basic = re.search(
-        r"Hồ Chí Minh\s+.*?Vàng nhẫn SJC 99,99% 1 chỉ, 2 chỉ, 5 chỉ\s+([\d\.,]+)\s+([\d\.,]+)",
-        text,
-        flags=re.IGNORECASE | re.DOTALL,
-    )
-
-    if sjc_full:
-        rows.append(
-            {
-                "source": "giavang.org",
-                "gold_type": "sjc_hcm",
-                "display_name": "Vàng miếng SJC",
-                "subtitle": "SJC - Hồ Chí Minh",
-                "buy_price": parse_domestic_gold_to_vnd_per_luong(sjc_full.group(1)),
-                "sell_price": parse_domestic_gold_to_vnd_per_luong(sjc_full.group(2)),
-                "unit": "VND/lượng",
-                "change_buy": parse_domestic_change_to_vnd(sjc_full.group(3)),
-                "change_sell": parse_domestic_change_to_vnd(sjc_full.group(4)),
-                "price_time": now_utc,
-            }
-        )
-    elif sjc_basic:
-        rows.append(
-            {
-                "source": "giavang.org",
-                "gold_type": "sjc_hcm",
-                "display_name": "Vàng miếng SJC",
-                "subtitle": "SJC - Hồ Chí Minh",
-                "buy_price": parse_domestic_gold_to_vnd_per_luong(sjc_basic.group(1)),
-                "sell_price": parse_domestic_gold_to_vnd_per_luong(sjc_basic.group(2)),
-                "unit": "VND/lượng",
-                "change_buy": None,
-                "change_sell": None,
-                "price_time": now_utc,
-            }
-        )
-
-    if ring_full:
-        rows.append(
-            {
-                "source": "giavang.org",
-                "gold_type": "ring_9999_hcm",
-                "display_name": "Vàng nhẫn 9999",
-                "subtitle": "SJC - Hồ Chí Minh",
-                "buy_price": parse_domestic_gold_to_vnd_per_luong(ring_full.group(1)),
-                "sell_price": parse_domestic_gold_to_vnd_per_luong(ring_full.group(2)),
-                "unit": "VND/lượng",
-                "change_buy": parse_domestic_change_to_vnd(ring_full.group(3)),
-                "change_sell": parse_domestic_change_to_vnd(ring_full.group(4)),
-                "price_time": now_utc,
-            }
-        )
-    elif ring_basic:
-        rows.append(
-            {
-                "source": "giavang.org",
-                "gold_type": "ring_9999_hcm",
-                "display_name": "Vàng nhẫn 9999",
-                "subtitle": "SJC - Hồ Chí Minh",
-                "buy_price": parse_domestic_gold_to_vnd_per_luong(ring_basic.group(1)),
-                "sell_price": parse_domestic_gold_to_vnd_per_luong(ring_basic.group(2)),
-                "unit": "VND/lượng",
-                "change_buy": None,
-                "change_sell": None,
-                "price_time": now_utc,
-            }
-        )
-
-    return rows
-
-
-def scrape_world_gold():
-    html = fetch_html(WORLD_URL)
-    soup = BeautifulSoup(html, "lxml")
-    text = soup.get_text("\n", strip=True)
-    now_utc = datetime.now(timezone.utc)
-
-    price_match = re.search(
-        r"Giá vàng quốc tế.*?là\s*([\d,]+\.\d+)\s*USD",
-        text,
-        flags=re.IGNORECASE,
-    )
-    if not price_match:
-        price_match = re.search(r"([\d,]+\.\d+)\s*USD", text)
-
-    if not price_match:
+    if not world_match:
         return None
 
-    price = parse_world_price(price_match.group(1))
+    price = parse_usd(world_match.group(1))
+    change = parse_usd_change(world_match.group(2))
+
     if price is None:
         return None
 
-    change = None
-    up_match = re.search(r"tăng\s*([-\d,\.]+)\s*USD", text, flags=re.IGNORECASE)
-    down_match = re.search(r"giảm\s*([-\d,\.]+)\s*USD", text, flags=re.IGNORECASE)
+    # ưu tiên lấy dòng cập nhật chi tiết đầu tiên
+    time_match = re.search(
+        r"XAU/USD.*?Ngày Giá \(USD\) Thay đổi Cập nhật\s+\d{2}/\d{2}\s+\$?[\d,]+\.\d+\s+[↑↓\-]?\s*[+\-]?\d+(?:\.\d+)?\s+(\d{2}:\d{2}\s+\d{2}/\d{2})",
+        text,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
 
-    if up_match:
-        parsed = parse_world_change(up_match.group(1))
-        if parsed is not None:
-            change = abs(parsed)
-    elif down_match:
-        parsed = parse_world_change(down_match.group(1))
-        if parsed is not None:
-            change = -abs(parsed)
+    price_time = parse_price_time_vn(time_match.group(1)) if time_match else datetime.now(timezone.utc)
 
     return {
-        "source": "giavang.org",
+        "source": "vang.today",
         "gold_type": "world_xauusd",
         "display_name": "Vàng thế giới",
-        "subtitle": "Vàng/Đô la Mỹ",
+        "subtitle": "XAU/USD",
         "buy_price": float(price),
         "sell_price": float(price),
         "unit": "USD/ounce",
-        "change_buy": change,
-        "change_sell": change,
-        "price_time": now_utc,
+        "change_buy": float(change),
+        "change_sell": float(change),
+        "price_time": price_time,
+    }
+
+
+def scrape_sjc_gold(text: str):
+    # block:
+    # SJC 9999
+    # SJL1L10
+    # 172.500.000₫
+    # ↓ -7.500.000
+    # 175.500.000₫
+    # ↓ -7.500.000
+    # Giảm
+    # 15:30 19/03
+    m = re.search(
+        r"SJC\s+9999\s+SJL1L10\s+([\d\.]+₫)\s+([↑↓\-]?\s*[+\-]?\s*[\d\.]+)?\s+([\d\.]+₫)\s+([↑↓\-]?\s*[+\-]?\s*[\d\.]+)?\s+\S+\s+(\d{2}:\d{2}\s+\d{2}/\d{2})",
+        text,
+        flags=re.IGNORECASE,
+    )
+    if not m:
+        return None
+
+    return {
+        "source": "vang.today",
+        "gold_type": "sjc_hcm",
+        "display_name": "Vàng miếng SJC",
+        "subtitle": "SJC 9999",
+        "buy_price": parse_vnd(m.group(1)),
+        "sell_price": parse_vnd(m.group(3)),
+        "unit": "VND/lượng",
+        "change_buy": parse_vnd_change(m.group(2)),
+        "change_sell": parse_vnd_change(m.group(4)),
+        "price_time": parse_price_time_vn(m.group(5)),
+    }
+
+
+def scrape_ring_gold(text: str):
+    # block:
+    # Nhẫn SJC
+    # SJ9999
+    # 172.200.000₫
+    # ↓ -7.500.000
+    # 175.200.000₫
+    # ↓ -7.500.000
+    # Giảm
+    # 15:30 19/03
+    m = re.search(
+        r"Nhẫn\s+SJC\s+SJ9999\s+([\d\.]+₫)\s+([↑↓\-]?\s*[+\-]?\s*[\d\.]+)?\s+([\d\.]+₫)\s+([↑↓\-]?\s*[+\-]?\s*[\d\.]+)?\s+\S+\s+(\d{2}:\d{2}\s+\d{2}/\d{2})",
+        text,
+        flags=re.IGNORECASE,
+    )
+    if not m:
+        return None
+
+    return {
+        "source": "vang.today",
+        "gold_type": "ring_9999_hcm",
+        "display_name": "Vàng nhẫn 9999",
+        "subtitle": "Nhẫn SJC",
+        "buy_price": parse_vnd(m.group(1)),
+        "sell_price": parse_vnd(m.group(3)),
+        "unit": "VND/lượng",
+        "change_buy": parse_vnd_change(m.group(2)),
+        "change_sell": parse_vnd_change(m.group(4)),
+        "price_time": parse_price_time_vn(m.group(5)),
     }
 
 
@@ -410,27 +343,34 @@ def main():
     try:
         cleanup_bad_rows(cur)
 
-        domestic_rows = scrape_domestic_gold()
-        domestic_rows = [row for row in domestic_rows if is_valid_row(row)]
+        text = extract_text_blocks()
 
-        for row in domestic_rows:
-            row = fill_change_from_previous_if_missing(cur, row)
-            insert_row(cur, row)
+        rows = []
 
-        world_row = scrape_world_gold()
+        sjc_row = scrape_sjc_gold(text)
+        if sjc_row and is_valid_row(sjc_row):
+            rows.append(fill_change_from_previous_if_missing(cur, sjc_row))
+
+        ring_row = scrape_ring_gold(text)
+        if ring_row and is_valid_row(ring_row):
+            rows.append(fill_change_from_previous_if_missing(cur, ring_row))
+
+        world_row = scrape_world_gold(text)
         if world_row and is_valid_row(world_row):
-            world_row = fill_change_from_previous_if_missing(cur, world_row)
-            insert_row(cur, world_row)
+            rows.append(fill_change_from_previous_if_missing(cur, world_row))
 
-        parsed_count = len(domestic_rows) + (1 if world_row and is_valid_row(world_row) else 0)
-        log(f"Gold parsed valid rows: {parsed_count}")
+        for row in rows:
+            insert_row(cur, row)
+            log(
+                f"Inserted {row['gold_type']} | buy={row['buy_price']} | sell={row['sell_price']} | source={row['source']}"
+            )
 
-        if parsed_count == 0:
-            raise RuntimeError("update_gold parse ra 0 dòng hợp lệ")
+        if len(rows) == 0:
+            raise RuntimeError("update_gold parse ra 0 dòng hợp lệ từ vang.today")
 
         trim_gold_rows(cur)
         conn.commit()
-        log("Done update_gold")
+        log(f"Done update_gold | inserted_rows={len(rows)}")
 
     finally:
         cur.close()
