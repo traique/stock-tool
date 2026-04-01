@@ -7,18 +7,18 @@ const supabase = createClient(
 
 const GOLD_ORDER = ["sjc_hcm", "ring_9999_hcm", "world_xauusd"];
 
-function pickLatestByType(rows) {
-  const latestMap = new Map();
+function toMillis(value) {
+  if (!value) return 0;
+  const t = new Date(value).getTime();
+  return Number.isNaN(t) ? 0 : t;
+}
 
-  for (const row of rows) {
-    if (!row || !row.gold_type) continue;
-    if (!GOLD_ORDER.includes(row.gold_type)) continue;
-    if (!latestMap.has(row.gold_type)) {
-      latestMap.set(row.gold_type, row);
-    }
-  }
+function sortNewest(a, b) {
+  const ta = toMillis(a.price_time || a.created_at);
+  const tb = toMillis(b.price_time || b.created_at);
 
-  return GOLD_ORDER.map((key) => latestMap.get(key)).filter(Boolean);
+  if (tb !== ta) return tb - ta;
+  return Number(b.id || 0) - Number(a.id || 0);
 }
 
 module.exports = async function handler(req, res) {
@@ -32,9 +32,7 @@ module.exports = async function handler(req, res) {
   }
 
   if (req.method !== "GET") {
-    return res.status(405).json({
-      error: "Method not allowed",
-    });
+    return res.status(405).json({ error: "Method not allowed" });
   }
 
   try {
@@ -44,9 +42,8 @@ module.exports = async function handler(req, res) {
         "id, source, gold_type, display_name, subtitle, buy_price, sell_price, unit, change_buy, change_sell, price_time, created_at"
       )
       .in("gold_type", GOLD_ORDER)
-      .order("price_time", { ascending: false })
       .order("id", { ascending: false })
-      .limit(50);
+      .limit(200);
 
     if (error) {
       return res.status(500).json({
@@ -54,9 +51,18 @@ module.exports = async function handler(req, res) {
       });
     }
 
-    const latestRows = pickLatestByType(data || []);
+    const rows = Array.isArray(data) ? data : [];
 
-    return res.status(200).json(latestRows);
+    const grouped = {};
+    for (const type of GOLD_ORDER) {
+      grouped[type] = rows
+        .filter((row) => row && row.gold_type === type)
+        .sort(sortNewest);
+    }
+
+    const result = GOLD_ORDER.map((type) => grouped[type][0]).filter(Boolean);
+
+    return res.status(200).json(result);
   } catch (err) {
     return res.status(500).json({
       error: err.message || "Internal Server Error",
