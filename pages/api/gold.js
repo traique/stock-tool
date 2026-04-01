@@ -1,6 +1,8 @@
-const { createClient } = require("@supabase/supabase-js");
+import { createClient } from "@supabase/supabase-js";
 
-module.exports = async function handler(req, res) {
+const GOLD_ORDER = ["sjc_hcm", "ring_9999_hcm", "world_xauusd"];
+
+export default async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Credentials", true);
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET,OPTIONS");
@@ -13,14 +15,14 @@ module.exports = async function handler(req, res) {
   try {
     const supabase = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL,
-      process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+      process.env.SUPABASE_SERVICE_ROLE_KEY
     );
 
     const { data, error } = await supabase
       .from("gold_prices")
       .select("*")
       .order("id", { ascending: false })
-      .limit(100);
+      .limit(200);
 
     if (error) {
       return res.status(500).json({
@@ -30,18 +32,16 @@ module.exports = async function handler(req, res) {
 
     const rows = Array.isArray(data) ? data : [];
 
-    const pickLatest = (type) => rows.find((r) => r && r.gold_type === type) || null;
-
-    const result = [
-      pickLatest("sjc_hcm"),
-      pickLatest("ring_9999_hcm"),
-      pickLatest("world_xauusd"),
-    ].filter(Boolean);
+    const result = [];
+    for (const type of GOLD_ORDER) {
+      const found = rows.find((row) => row && row.gold_type === type);
+      if (found) result.push(found);
+    }
 
     return res.status(200).json(result);
   } catch (err) {
     return res.status(500).json({
-      error: err.message || "Internal Server Error",
+      error: err.message || "Unknown server error",
     });
   }
-};
+}
