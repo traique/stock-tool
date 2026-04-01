@@ -1,14 +1,17 @@
 import os
+import re
 from datetime import datetime, timezone
 
 import psycopg2
 import requests
+from bs4 import BeautifulSoup
 
 DB_URL = os.environ["DB_URL"]
 
 API_ALL_URL = "https://www.vang.today/api/prices"
 API_TYPE_URL = "https://www.vang.today/api/prices?type={code}"
-TIMEOUT = 20
+WEB_URL = "https://www.vang.today/"
+TIMEOUT = 25
 
 GOLD_TYPES = [
     {
@@ -41,14 +44,26 @@ def log(message: str) -> None:
 
 def http_get_json(url: str):
     headers = {
-        "User-Agent": "Mozilla/5.0 (compatible; AlphaPulseEliteBot/3.1)",
-        "Accept": "application/json",
+        "User-Agent": "Mozilla/5.0 (compatible; AlphaPulseEliteBot/3.2)",
+        "Accept": "application/json,text/plain,*/*",
         "Cache-Control": "no-cache",
         "Pragma": "no-cache",
     }
     r = requests.get(url, headers=headers, timeout=TIMEOUT)
     r.raise_for_status()
     return r.json()
+
+
+def http_get_text(url: str):
+    headers = {
+        "User-Agent": "Mozilla/5.0 (compatible; AlphaPulseEliteBot/3.2)",
+        "Accept-Language": "vi-VN,vi;q=0.9,en;q=0.8",
+        "Cache-Control": "no-cache",
+        "Pragma": "no-cache",
+    }
+    r = requests.get(url, headers=headers, timeout=TIMEOUT)
+    r.raise_for_status()
+    return r.text
 
 
 def parse_time(ts):
@@ -61,6 +76,23 @@ def parse_time(ts):
         return datetime.fromtimestamp(value, tz=timezone.utc)
     except Exception:
         return datetime.now(timezone.utc)
+
+
+def parse_vn_time(text: str):
+    # ví dụ: 13:30 27/03
+    m = re.search(r"(\d{2}):(\d{2})\s+(\d{2})/(\d{2})", text)
+    if not m:
+        return datetime.now(timezone.utc)
+
+    hour = int(m.group(1))
+    minute = int(m.group(2))
+    day = int(m.group(3))
+    month = int(m.group(4))
+    year = datetime.now().year
+
+    local_dt = datetime(year, month, day, hour, minute)
+    utc_ts = local_dt.replace(tzinfo=timezone.utc).timestamp() - 7 * 3600
+    return datetime.fromtimestamp(utc_ts, tz=timezone.utc)
 
 
 def cleanup_bad_rows(cur):
@@ -105,7 +137,7 @@ def is_valid_row(row: dict) -> bool:
     return True
 
 
-def build_row(meta: dict, api_row: dict) -> dict:
+def build_row_from_api(meta: dict, api_row: dict) -> dict:
     if meta["unit"] == "VND/lượng":
         buy_price = int(api_row.get("buy") or 0)
         sell_price = int(api_row.get("sell") or 0)
@@ -156,28 +188,146 @@ def insert_row(cur, row: dict) -> None:
 
 
 def fetch_all_prices():
-    payload = http_get_json(API_ALL_URL)
-    if not payload or not payload.get("success"):
-        raise RuntimeError("vang.today API all prices failed")
-
-    rows = payload.get("data") or []
-    mapping = {}
-    for row in rows:
-        code = row.get("type_code")
-        if code:
-            mapping[code] = row
-    return mapping
+    try:
+        payload = http_get_json(API_ALL_URL)
+        if not payload or not payload.get("success"):
+            return {}
+        rows = payload.get("data") or []
+        mapping = {}
+        for row in rows:
+            code = row.get("type_code")
+            if code:
+                mapping[code] = row
+        return mapping
+    except Exception as e:
+        log(f"API all prices error: {e}")
+        return {}
 
 
 def fetch_type_price(code: str):
-    payload = http_get_json(API_TYPE_URL.format(code=code))
-    if not payload or not payload.get("success"):
+    try:
+        payload = http_get_json(API_TYPE_URL.format(code=code))
+        if not payload or not payload.get("success"):
+            return None
+        rows = payload.get("data") or []
+        if not rows:
+            return None
+        return rows[0]
+    except Exception as e:
+        log(f"API type error {code}: {e}")
         return None
 
-    rows = payload.get("data") or []
-    if not rows:
+
+def parse_int_vnd(text: str):
+    digits = re.sub(r"[^\d]", "", text or "")
+    return int(digits) if digits else None
+
+
+def parse_float_usd(text: str):
+    m = re.search(r"[\d,]+\.\d+", text or "")
+    if not m:
         return None
-    return rows[0]
+    return float(m.group(0).replace(",", ""))
+
+
+def parse_change_vnd(text: str):
+    if not text:
+        return 0
+    sign = -1 if ("↓" in text or "-" in text.strip()) else 1
+    digits = re.sub(r"[^\d]", "", text)
+    if not digits:
+        return 0
+    return sign * int(digits)
+
+
+def parse_change_usd(text: str):
+    if not text:
+        return 0.0
+    sign = -1 if ("↓" in text or "-" in text.strip()) else 1
+    m = re.search(r"\d+(?:\.\d+)?", text.replace(",", ""))
+    if not m:
+        return 0.0
+    return sign * float(m.group(0))
+
+
+def scrape_page_text():
+    html = http_get_text(WEB_URL)
+    soup = BeautifulSoup(html, "lxml")
+    text = soup.get_text("\n", strip=True)
+    return text
+
+
+def scrape_sjc_from_text(text: str):
+    # SJC 9999 / SJL1L10 / buy / change / sell / change / trend / update
+    m = re.search(
+        r"SJC\s+9999\s+SJL1L10\s+([\d\.]+₫)\s+([↑↓]\s*[+\-]?\s*[\d\.]+|[\+\-]\s*[\d\.]+)?\s+"
+        r"([\d\.]+₫)\s+([↑↓]\s*[+\-]?\s*[\d\.]+|[\+\-]\s*[\d\.]+)?\s+\S+\s+(\d{2}:\d{2}\s+\d{2}/\d{2})",
+        text,
+        flags=re.IGNORECASE,
+    )
+    if not m:
+        return None
+
+    return {
+        "source": "vang.today",
+        "gold_type": "sjc_hcm",
+        "display_name": "Vàng miếng SJC",
+        "subtitle": "SJL1L10",
+        "buy_price": parse_int_vnd(m.group(1)),
+        "sell_price": parse_int_vnd(m.group(3)),
+        "unit": "VND/lượng",
+        "change_buy": parse_change_vnd(m.group(2) or ""),
+        "change_sell": parse_change_vnd(m.group(4) or ""),
+        "price_time": parse_vn_time(m.group(5)),
+    }
+
+
+def scrape_ring_from_text(text: str):
+    m = re.search(
+        r"Nhẫn\s+SJC\s+SJ9999\s+([\d\.]+₫)\s+([↑↓]\s*[+\-]?\s*[\d\.]+|[\+\-]\s*[\d\.]+)?\s+"
+        r"([\d\.]+₫)\s+([↑↓]\s*[+\-]?\s*[\d\.]+|[\+\-]\s*[\d\.]+)?\s+\S+\s+(\d{2}:\d{2}\s+\d{2}/\d{2})",
+        text,
+        flags=re.IGNORECASE,
+    )
+    if not m:
+        return None
+
+    return {
+        "source": "vang.today",
+        "gold_type": "ring_9999_hcm",
+        "display_name": "Nhẫn SJC",
+        "subtitle": "SJ9999",
+        "buy_price": parse_int_vnd(m.group(1)),
+        "sell_price": parse_int_vnd(m.group(3)),
+        "unit": "VND/lượng",
+        "change_buy": parse_change_vnd(m.group(2) or ""),
+        "change_sell": parse_change_vnd(m.group(4) or ""),
+        "price_time": parse_vn_time(m.group(5)),
+    }
+
+
+def scrape_world_from_text(text: str):
+    # XAU/USD / 4,571.20 / ↑ +31.30
+    m = re.search(
+        r"XAU/USD\s+\$?([\d,]+\.\d+)\s+([↑↓]\s*[+\-]?\s*[\d,]+(?:\.\d+)?|[\+\-]\s*[\d,]+(?:\.\d+)?)",
+        text,
+        flags=re.IGNORECASE,
+    )
+    if not m:
+        return None
+
+    return {
+        "source": "vang.today",
+        "gold_type": "world_xauusd",
+        "display_name": "Vàng thế giới",
+        "subtitle": "XAU/USD",
+        "buy_price": parse_float_usd(m.group(1)),
+        "sell_price": parse_float_usd(m.group(1)),
+        "unit": "USD/ounce",
+        "change_buy": parse_change_usd(m.group(2)),
+        "change_sell": parse_change_usd(m.group(2)),
+        "price_time": datetime.now(timezone.utc),
+    }
 
 
 def main():
@@ -189,40 +339,66 @@ def main():
     try:
         cleanup_bad_rows(cur)
 
-        all_prices = fetch_all_prices()
         rows = []
+        all_prices = fetch_all_prices()
 
+        # API trước
         for meta in GOLD_TYPES:
             api_row = all_prices.get(meta["code"])
-
             if not api_row:
                 log(f"Fallback fetch by type for {meta['code']}")
                 api_row = fetch_type_price(meta["code"])
 
-            if not api_row:
-                log(f"MISS {meta['code']}")
-                continue
+            if api_row:
+                row = build_row_from_api(meta, api_row)
+                if is_valid_row(row):
+                    rows.append(row)
+                    log(
+                        f"API OK {row['gold_type']} | buy={row['buy_price']} | sell={row['sell_price']} | "
+                        f"change_buy={row['change_buy']} | change_sell={row['change_sell']}"
+                    )
 
-            row = build_row(meta, api_row)
+        # nếu API chưa đủ 3 dòng thì fallback sang web text
+        missing_types = {m["gold_type"] for m in GOLD_TYPES} - {r["gold_type"] for r in rows}
+        if missing_types:
+            log(f"Need web fallback for: {', '.join(sorted(missing_types))}")
+            text = scrape_page_text()
 
-            if is_valid_row(row):
+            fallback_rows = [
+                scrape_sjc_from_text(text),
+                scrape_ring_from_text(text),
+                scrape_world_from_text(text),
+            ]
+
+            for row in fallback_rows:
+                if not row:
+                    continue
+                if row["gold_type"] not in missing_types:
+                    continue
+                if not is_valid_row(row):
+                    log(f"SKIP invalid web row: {row}")
+                    continue
                 rows.append(row)
                 log(
-                    f"{row['gold_type']} | buy={row['buy_price']} | sell={row['sell_price']} | "
+                    f"WEB OK {row['gold_type']} | buy={row['buy_price']} | sell={row['sell_price']} | "
                     f"change_buy={row['change_buy']} | change_sell={row['change_sell']}"
                 )
-            else:
-                log(f"SKIP invalid row: {row}")
 
         if not rows:
             raise RuntimeError("update_gold parse ra 0 dòng hợp lệ")
 
+        # chỉ giữ 1 dòng / loại
+        final_map = {}
         for row in rows:
+            final_map[row["gold_type"]] = row
+        final_rows = list(final_map.values())
+
+        for row in final_rows:
             insert_row(cur, row)
 
         trim_gold_rows(cur)
         conn.commit()
-        log(f"Done update_gold | inserted {len(rows)} rows")
+        log(f"Done update_gold | inserted {len(final_rows)} rows")
 
     finally:
         cur.close()
