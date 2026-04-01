@@ -44,7 +44,7 @@ def log(message: str) -> None:
 
 def http_get_json(url: str):
     headers = {
-        "User-Agent": "Mozilla/5.0 (compatible; AlphaPulseEliteBot/6.0)",
+        "User-Agent": "Mozilla/5.0 (compatible; AlphaPulseEliteBot/7.0)",
         "Accept": "application/json,text/plain,*/*",
         "Cache-Control": "no-cache",
         "Pragma": "no-cache",
@@ -56,7 +56,7 @@ def http_get_json(url: str):
 
 def http_get_text(url: str):
     headers = {
-        "User-Agent": "Mozilla/5.0 (compatible; AlphaPulseEliteBot/6.0)",
+        "User-Agent": "Mozilla/5.0 (compatible; AlphaPulseEliteBot/7.0)",
         "Accept-Language": "vi-VN,vi;q=0.9,en;q=0.8",
         "Cache-Control": "no-cache",
         "Pragma": "no-cache",
@@ -226,7 +226,6 @@ def fetch_all_prices():
             if code:
                 mapping[code] = row
         log(f"API all prices count = {len(rows)}")
-        log(f"API all codes = {', '.join(sorted(mapping.keys())[:50])}")
         return mapping
     except Exception as e:
         log(f"API all prices error: {e}")
@@ -237,7 +236,6 @@ def fetch_type_price(code: str):
     try:
         payload = http_get_json(API_TYPE_URL.format(code=code))
         if not payload or not payload.get("success"):
-            log(f"API type {code} success=false")
             return None
         rows = payload.get("data") or []
         log(f"API type {code} rows = {len(rows)}")
@@ -247,103 +245,117 @@ def fetch_type_price(code: str):
         return None
 
 
-def scrape_page_text():
+def scrape_page_tokens():
     html = http_get_text(WEB_URL)
     soup = BeautifulSoup(html, "lxml")
     text = soup.get_text("\n", strip=True)
-
     log(f"WEB text length = {len(text)}")
-    for keyword in ["SJL1L10", "SJ9999", "XAU/USD", "SJC 9999", "Nhẫn SJC"]:
-        if keyword in text:
-            idx = text.find(keyword)
+
+    normalized = text.replace("\xa0", " ")
+    normalized = re.sub(r"\s*\n\s*", " | ", normalized)
+    normalized = re.sub(r"\s+", " ", normalized)
+
+    for keyword in ["SJL1L10", "SJ9999", "XAU/USD"]:
+        if keyword in normalized:
+            idx = normalized.find(keyword)
             start = max(0, idx - 180)
-            end = min(len(text), idx + 420)
-            log(f"FOUND [{keyword}] => {text[start:end].replace(chr(10), ' | ')}")
-        else:
-            log(f"NOT FOUND [{keyword}]")
-    return text
+            end = min(len(normalized), idx + 420)
+            log(f"FOUND [{keyword}] => {normalized[start:end]}")
+
+    tokens = [t.strip() for t in normalized.split("|")]
+    tokens = [t for t in tokens if t]
+    return tokens, normalized
 
 
-def normalize_text(text: str) -> str:
-    text = text.replace("\xa0", " ")
-    text = re.sub(r"\s+", " ", text)
-    text = text.replace(" ₫", "₫")
-    return text
+def find_token_block(tokens, key):
+    try:
+        idx = tokens.index(key)
+    except ValueError:
+        return None
+    start = max(0, idx - 2)
+    end = min(len(tokens), idx + 12)
+    block = tokens[start:end]
+    log(f"BLOCK {key} => {' || '.join(block)}")
+    return block
 
 
-def scrape_sjc_from_text(text: str):
-    t = normalize_text(text)
-    pattern = (
-        r"SJC\s*9999\s*SJL1L10\s*"
-        r"([\d\.]+)\s*₫\s*"
-        r"([↑↓]\s*[+\-]?\s*[\d\.]+)\s*"
-        r"([\d\.]+)\s*₫\s*"
-        r"([↑↓]\s*[+\-]?\s*[\d\.]+)\s*"
-        r"(?:Tăng|Giảm|\+|-|\.)\s*"
-        r"(\d{2}:\d{2}\s+\d{2}/\d{2})"
-    )
-    m = re.search(pattern, t, flags=re.IGNORECASE)
-    if m:
-        log("SJC MATCH")
-        return {
+def scrape_sjc_from_tokens(tokens):
+    block = find_token_block(tokens, "SJL1L10")
+    if not block:
+        log("SJC NO BLOCK")
+        return None
+
+    try:
+        idx = block.index("SJL1L10")
+        buy = parse_int_vnd(block[idx + 1])
+        change_buy = parse_change_vnd(block[idx + 3])
+        sell = parse_int_vnd(block[idx + 4])
+        change_sell = parse_change_vnd(block[idx + 6])
+        price_time = parse_vn_time(block[idx + 8])
+
+        row = {
             "source": "vang.today",
             "gold_type": "sjc_hcm",
             "display_name": "SJC 9999",
             "subtitle": "SJL1L10",
-            "buy_price": parse_int_vnd(m.group(1)),
-            "sell_price": parse_int_vnd(m.group(3)),
+            "buy_price": buy,
+            "sell_price": sell,
             "unit": "VND/lượng",
-            "change_buy": parse_change_vnd(m.group(2)),
-            "change_sell": parse_change_vnd(m.group(4)),
-            "price_time": parse_vn_time(m.group(5)),
+            "change_buy": change_buy,
+            "change_sell": change_sell,
+            "price_time": price_time,
         }
-    log("SJC NO MATCH")
-    return None
+        log(f"SJC PARSED => {row}")
+        return row
+    except Exception as e:
+        log(f"SJC PARSE ERROR => {e}")
+        return None
 
 
-def scrape_ring_from_text(text: str):
-    t = normalize_text(text)
-    pattern = (
-        r"Nhẫn\s*SJC\s*SJ9999\s*"
-        r"([\d\.]+)\s*₫\s*"
-        r"([↑↓]\s*[+\-]?\s*[\d\.]+)\s*"
-        r"([\d\.]+)\s*₫\s*"
-        r"([↑↓]\s*[+\-]?\s*[\d\.]+)\s*"
-        r"(?:Tăng|Giảm|\+|-|\.)\s*"
-        r"(\d{2}:\d{2}\s+\d{2}/\d{2})"
-    )
-    m = re.search(pattern, t, flags=re.IGNORECASE)
-    if m:
-        log("RING MATCH")
-        return {
+def scrape_ring_from_tokens(tokens):
+    block = find_token_block(tokens, "SJ9999")
+    if not block:
+        log("RING NO BLOCK")
+        return None
+
+    try:
+        idx = block.index("SJ9999")
+        buy = parse_int_vnd(block[idx + 1])
+        change_buy = parse_change_vnd(block[idx + 3])
+        sell = parse_int_vnd(block[idx + 4])
+        change_sell = parse_change_vnd(block[idx + 6])
+        price_time = parse_vn_time(block[idx + 8])
+
+        row = {
             "source": "vang.today",
             "gold_type": "ring_9999_hcm",
             "display_name": "Nhẫn SJC",
             "subtitle": "SJ9999",
-            "buy_price": parse_int_vnd(m.group(1)),
-            "sell_price": parse_int_vnd(m.group(3)),
+            "buy_price": buy,
+            "sell_price": sell,
             "unit": "VND/lượng",
-            "change_buy": parse_change_vnd(m.group(2)),
-            "change_sell": parse_change_vnd(m.group(4)),
-            "price_time": parse_vn_time(m.group(5)),
+            "change_buy": change_buy,
+            "change_sell": change_sell,
+            "price_time": price_time,
         }
-    log("RING NO MATCH")
-    return None
+        log(f"RING PARSED => {row}")
+        return row
+    except Exception as e:
+        log(f"RING PARSE ERROR => {e}")
+        return None
 
 
-def scrape_world_from_text(text: str):
-    t = normalize_text(text)
+def scrape_world_from_text(normalized: str):
     patterns = [
-        r"XAU/USD\s*\$?([\d,]+\.\d+)\s*([↑↓]\s*[+\-]?\s*[\d,]+(?:\.\d+)?)",
-        r"Vàng\s*Thế\s*Giới\s*XAU/USD\s*\$?([\d,]+\.\d+)\s*([↑↓]\s*[+\-]?\s*[\d,]+(?:\.\d+)?)",
+        r"XAU/USD\s*\|\s*\$?([\d,]+\.\d+)\s*\|\s*([↑↓]\s*[+\-]?\s*[\d,]+(?:\.\d+)?)",
+        r"XAU/USD\s+\$?([\d,]+\.\d+)\s+([↑↓]\s*[+\-]?\s*[\d,]+(?:\.\d+)?)",
     ]
     for i, pattern in enumerate(patterns, start=1):
-        m = re.search(pattern, t, flags=re.IGNORECASE)
+        m = re.search(pattern, normalized, flags=re.IGNORECASE)
         if m:
-            log(f"WORLD MATCH pattern {i}")
             price = parse_float_usd(m.group(1))
             change = parse_change_usd(m.group(2))
-            return {
+            row = {
                 "source": "vang.today",
                 "gold_type": "world_xauusd",
                 "display_name": "Vàng thế giới",
@@ -355,6 +367,8 @@ def scrape_world_from_text(text: str):
                 "change_sell": change,
                 "price_time": datetime.now(timezone.utc),
             }
+            log(f"WORLD PARSED pattern {i} => {row}")
+            return row
     log("WORLD NO MATCH")
     return None
 
@@ -381,12 +395,7 @@ def main():
                 row = build_row_from_api(meta, api_row)
                 if is_valid_row(row):
                     rows.append(row)
-                    log(
-                        f"API OK {row['gold_type']} | buy={row['buy_price']} | sell={row['sell_price']} | "
-                        f"change_buy={row['change_buy']} | change_sell={row['change_sell']}"
-                    )
-                else:
-                    log(f"API INVALID {meta['code']} => {row}")
+                    log(f"API OK {row['gold_type']} => buy={row['buy_price']} sell={row['sell_price']}")
             else:
                 log(f"MISS API {meta['code']}")
 
@@ -394,12 +403,12 @@ def main():
 
         if missing_types:
             log(f"Need web fallback for: {', '.join(sorted(missing_types))}")
-            text = scrape_page_text()
+            tokens, normalized = scrape_page_tokens()
 
             fallback_rows = [
-                scrape_sjc_from_text(text),
-                scrape_ring_from_text(text),
-                scrape_world_from_text(text),
+                scrape_sjc_from_tokens(tokens),
+                scrape_ring_from_tokens(tokens),
+                scrape_world_from_text(normalized),
             ]
 
             for row in fallback_rows:
