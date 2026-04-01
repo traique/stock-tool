@@ -17,7 +17,7 @@ GOLD_TYPES = [
     {
         "code": "SJL1L10",
         "gold_type": "sjc_hcm",
-        "display_name": "Vàng miếng SJC",
+        "display_name": "SJC 9999",
         "subtitle": "SJL1L10",
         "unit": "VND/lượng",
     },
@@ -44,7 +44,7 @@ def log(message: str) -> None:
 
 def http_get_json(url: str):
     headers = {
-        "User-Agent": "Mozilla/5.0 (compatible; AlphaPulseEliteBot/3.2)",
+        "User-Agent": "Mozilla/5.0 (compatible; AlphaPulseEliteBot/4.0)",
         "Accept": "application/json,text/plain,*/*",
         "Cache-Control": "no-cache",
         "Pragma": "no-cache",
@@ -56,7 +56,7 @@ def http_get_json(url: str):
 
 def http_get_text(url: str):
     headers = {
-        "User-Agent": "Mozilla/5.0 (compatible; AlphaPulseEliteBot/3.2)",
+        "User-Agent": "Mozilla/5.0 (compatible; AlphaPulseEliteBot/4.0)",
         "Accept-Language": "vi-VN,vi;q=0.9,en;q=0.8",
         "Cache-Control": "no-cache",
         "Pragma": "no-cache",
@@ -66,7 +66,7 @@ def http_get_text(url: str):
     return r.text
 
 
-def parse_time(ts):
+def parse_unix_time(ts):
     if ts is None:
         return datetime.now(timezone.utc)
     try:
@@ -79,8 +79,7 @@ def parse_time(ts):
 
 
 def parse_vn_time(text: str):
-    # ví dụ: 13:30 27/03
-    m = re.search(r"(\d{2}):(\d{2})\s+(\d{2})/(\d{2})", text)
+    m = re.search(r"(\d{2}):(\d{2})\s+(\d{2})/(\d{2})", text or "")
     if not m:
         return datetime.now(timezone.utc)
 
@@ -93,6 +92,40 @@ def parse_vn_time(text: str):
     local_dt = datetime(year, month, day, hour, minute)
     utc_ts = local_dt.replace(tzinfo=timezone.utc).timestamp() - 7 * 3600
     return datetime.fromtimestamp(utc_ts, tz=timezone.utc)
+
+
+def parse_int_vnd(text: str):
+    digits = re.sub(r"[^\d]", "", text or "")
+    if not digits:
+        return None
+    return int(digits)
+
+
+def parse_float_usd(text: str):
+    m = re.search(r"[\d,]+\.\d+", text or "")
+    if not m:
+        return None
+    return float(m.group(0).replace(",", ""))
+
+
+def parse_change_vnd(text: str):
+    if not text:
+        return 0
+    sign = -1 if ("↓" in text or text.strip().startswith("-")) else 1
+    digits = re.sub(r"[^\d]", "", text)
+    if not digits:
+        return 0
+    return sign * int(digits)
+
+
+def parse_change_usd(text: str):
+    if not text:
+        return 0.0
+    sign = -1 if ("↓" in text or text.strip().startswith("-")) else 1
+    m = re.search(r"\d+(?:\.\d+)?", text.replace(",", ""))
+    if not m:
+        return 0.0
+    return sign * float(m.group(0))
 
 
 def cleanup_bad_rows(cur):
@@ -113,7 +146,7 @@ def trim_gold_rows(cur):
           select id from (
             select id,
                    row_number() over (
-                     partition by source, gold_type
+                     partition by gold_type
                      order by price_time desc, id desc
                    ) as rn
             from gold_prices
@@ -159,7 +192,7 @@ def build_row_from_api(meta: dict, api_row: dict) -> dict:
         "unit": meta["unit"],
         "change_buy": change_buy,
         "change_sell": change_sell,
-        "price_time": parse_time(api_row.get("update_time")),
+        "price_time": parse_unix_time(api_row.get("update_time") or api_row.get("time")),
     }
 
 
@@ -218,38 +251,6 @@ def fetch_type_price(code: str):
         return None
 
 
-def parse_int_vnd(text: str):
-    digits = re.sub(r"[^\d]", "", text or "")
-    return int(digits) if digits else None
-
-
-def parse_float_usd(text: str):
-    m = re.search(r"[\d,]+\.\d+", text or "")
-    if not m:
-        return None
-    return float(m.group(0).replace(",", ""))
-
-
-def parse_change_vnd(text: str):
-    if not text:
-        return 0
-    sign = -1 if ("↓" in text or "-" in text.strip()) else 1
-    digits = re.sub(r"[^\d]", "", text)
-    if not digits:
-        return 0
-    return sign * int(digits)
-
-
-def parse_change_usd(text: str):
-    if not text:
-        return 0.0
-    sign = -1 if ("↓" in text or "-" in text.strip()) else 1
-    m = re.search(r"\d+(?:\.\d+)?", text.replace(",", ""))
-    if not m:
-        return 0.0
-    return sign * float(m.group(0))
-
-
 def scrape_page_text():
     html = http_get_text(WEB_URL)
     soup = BeautifulSoup(html, "lxml")
@@ -258,76 +259,94 @@ def scrape_page_text():
 
 
 def scrape_sjc_from_text(text: str):
-    # SJC 9999 / SJL1L10 / buy / change / sell / change / trend / update
-    m = re.search(
-        r"SJC\s+9999\s+SJL1L10\s+([\d\.]+₫)\s+([↑↓]\s*[+\-]?\s*[\d\.]+|[\+\-]\s*[\d\.]+)?\s+"
-        r"([\d\.]+₫)\s+([↑↓]\s*[+\-]?\s*[\d\.]+|[\+\-]\s*[\d\.]+)?\s+\S+\s+(\d{2}:\d{2}\s+\d{2}/\d{2})",
-        text,
-        flags=re.IGNORECASE,
-    )
-    if not m:
-        return None
-
-    return {
-        "source": "vang.today",
-        "gold_type": "sjc_hcm",
-        "display_name": "Vàng miếng SJC",
-        "subtitle": "SJL1L10",
-        "buy_price": parse_int_vnd(m.group(1)),
-        "sell_price": parse_int_vnd(m.group(3)),
-        "unit": "VND/lượng",
-        "change_buy": parse_change_vnd(m.group(2) or ""),
-        "change_sell": parse_change_vnd(m.group(4) or ""),
-        "price_time": parse_vn_time(m.group(5)),
-    }
+    patterns = [
+        r"SJC\s*9999\s+SJL1L10\s+([\d\.]+₫)\s+([↑↓]\s*[+\-]?\s*[\d\.]+)?\s+([\d\.]+₫)\s+([↑↓]\s*[+\-]?\s*[\d\.]+)?\s+\S+\s+(\d{2}:\d{2}\s+\d{2}/\d{2})",
+        r"SJC\s*9999\s+SJL1L10.*?([\d\.]+₫).*?([↑↓]\s*[+\-]?\s*[\d\.]+)?.*?([\d\.]+₫).*?([↑↓]\s*[+\-]?\s*[\d\.]+)?.*?(\d{2}:\d{2}\s+\d{2}/\d{2})",
+    ]
+    for pattern in patterns:
+      m = re.search(pattern, text, flags=re.IGNORECASE | re.DOTALL)
+      if m:
+        return {
+            "source": "vang.today",
+            "gold_type": "sjc_hcm",
+            "display_name": "SJC 9999",
+            "subtitle": "SJL1L10",
+            "buy_price": parse_int_vnd(m.group(1)),
+            "sell_price": parse_int_vnd(m.group(3)),
+            "unit": "VND/lượng",
+            "change_buy": parse_change_vnd(m.group(2) or ""),
+            "change_sell": parse_change_vnd(m.group(4) or ""),
+            "price_time": parse_vn_time(m.group(5)),
+        }
+    return None
 
 
 def scrape_ring_from_text(text: str):
-    m = re.search(
-        r"Nhẫn\s+SJC\s+SJ9999\s+([\d\.]+₫)\s+([↑↓]\s*[+\-]?\s*[\d\.]+|[\+\-]\s*[\d\.]+)?\s+"
-        r"([\d\.]+₫)\s+([↑↓]\s*[+\-]?\s*[\d\.]+|[\+\-]\s*[\d\.]+)?\s+\S+\s+(\d{2}:\d{2}\s+\d{2}/\d{2})",
-        text,
-        flags=re.IGNORECASE,
-    )
-    if not m:
-        return None
-
-    return {
-        "source": "vang.today",
-        "gold_type": "ring_9999_hcm",
-        "display_name": "Nhẫn SJC",
-        "subtitle": "SJ9999",
-        "buy_price": parse_int_vnd(m.group(1)),
-        "sell_price": parse_int_vnd(m.group(3)),
-        "unit": "VND/lượng",
-        "change_buy": parse_change_vnd(m.group(2) or ""),
-        "change_sell": parse_change_vnd(m.group(4) or ""),
-        "price_time": parse_vn_time(m.group(5)),
-    }
+    patterns = [
+        r"Nhẫn\s*SJC\s+SJ9999\s+([\d\.]+₫)\s+([↑↓]\s*[+\-]?\s*[\d\.]+)?\s+([\d\.]+₫)\s+([↑↓]\s*[+\-]?\s*[\d\.]+)?\s+\S+\s+(\d{2}:\d{2}\s+\d{2}/\d{2})",
+        r"Nhẫn\s*SJC\s+SJ9999.*?([\d\.]+₫).*?([↑↓]\s*[+\-]?\s*[\d\.]+)?.*?([\d\.]+₫).*?([↑↓]\s*[+\-]?\s*[\d\.]+)?.*?(\d{2}:\d{2}\s+\d{2}/\d{2})",
+    ]
+    for pattern in patterns:
+      m = re.search(pattern, text, flags=re.IGNORECASE | re.DOTALL)
+      if m:
+        return {
+            "source": "vang.today",
+            "gold_type": "ring_9999_hcm",
+            "display_name": "Nhẫn SJC",
+            "subtitle": "SJ9999",
+            "buy_price": parse_int_vnd(m.group(1)),
+            "sell_price": parse_int_vnd(m.group(3)),
+            "unit": "VND/lượng",
+            "change_buy": parse_change_vnd(m.group(2) or ""),
+            "change_sell": parse_change_vnd(m.group(4) or ""),
+            "price_time": parse_vn_time(m.group(5)),
+        }
+    return None
 
 
 def scrape_world_from_text(text: str):
-    # XAU/USD / 4,571.20 / ↑ +31.30
-    m = re.search(
-        r"XAU/USD\s+\$?([\d,]+\.\d+)\s+([↑↓]\s*[+\-]?\s*[\d,]+(?:\.\d+)?|[\+\-]\s*[\d,]+(?:\.\d+)?)",
-        text,
-        flags=re.IGNORECASE,
-    )
-    if not m:
-        return None
+    patterns = [
+        r"XAU/USD\s+\$?([\d,]+\.\d+)\s+([↑↓]\s*[+\-]?\s*[\d,]+(?:\.\d+)?)",
+        r"Vàng\s*Thế\s*Giới\s+XAU/USD\s+\$?([\d,]+\.\d+)\s+([↑↓]\s*[+\-]?\s*[\d,]+(?:\.\d+)?)",
+    ]
+    for pattern in patterns:
+      m = re.search(pattern, text, flags=re.IGNORECASE)
+      if m:
+        price = parse_float_usd(m.group(1))
+        change = parse_change_usd(m.group(2))
+        return {
+            "source": "vang.today",
+            "gold_type": "world_xauusd",
+            "display_name": "Vàng thế giới",
+            "subtitle": "XAU/USD",
+            "buy_price": price,
+            "sell_price": price,
+            "unit": "USD/ounce",
+            "change_buy": change,
+            "change_sell": change,
+            "price_time": datetime.now(timezone.utc),
+        }
+    return None
 
-    return {
-        "source": "vang.today",
-        "gold_type": "world_xauusd",
-        "display_name": "Vàng thế giới",
-        "subtitle": "XAU/USD",
-        "buy_price": parse_float_usd(m.group(1)),
-        "sell_price": parse_float_usd(m.group(1)),
-        "unit": "USD/ounce",
-        "change_buy": parse_change_usd(m.group(2)),
-        "change_sell": parse_change_usd(m.group(2)),
-        "price_time": datetime.now(timezone.utc),
-    }
+
+def delete_latest_domestic_if_same_or_older(cur, row):
+    if row["gold_type"] not in ("sjc_hcm", "ring_9999_hcm", "world_xauusd"):
+        return
+
+    cur.execute(
+        """
+        delete from gold_prices
+        where id in (
+          select id
+          from gold_prices
+          where gold_type = %s
+            and price_time <= %s
+          order by price_time desc, id desc
+          limit 1
+        )
+        """,
+        (row["gold_type"], row["price_time"]),
+    )
 
 
 def main():
@@ -342,7 +361,6 @@ def main():
         rows = []
         all_prices = fetch_all_prices()
 
-        # API trước
         for meta in GOLD_TYPES:
             api_row = all_prices.get(meta["code"])
             if not api_row:
@@ -358,11 +376,18 @@ def main():
                         f"change_buy={row['change_buy']} | change_sell={row['change_sell']}"
                     )
 
-        # nếu API chưa đủ 3 dòng thì fallback sang web text
         missing_types = {m["gold_type"] for m in GOLD_TYPES} - {r["gold_type"] for r in rows}
+
         if missing_types:
             log(f"Need web fallback for: {', '.join(sorted(missing_types))}")
             text = scrape_page_text()
+
+            if "SJL1L10" in text:
+                log("WEB contains SJL1L10")
+            if "SJ9999" in text:
+                log("WEB contains SJ9999")
+            if "XAU/USD" in text:
+                log("WEB contains XAU/USD")
 
             fallback_rows = [
                 scrape_sjc_from_text(text),
@@ -387,7 +412,6 @@ def main():
         if not rows:
             raise RuntimeError("update_gold parse ra 0 dòng hợp lệ")
 
-        # chỉ giữ 1 dòng / loại
         final_map = {}
         for row in rows:
             final_map[row["gold_type"]] = row
