@@ -6,7 +6,8 @@ import requests
 
 DB_URL = os.environ["DB_URL"]
 
-API_BASE = "https://www.vang.today/api/prices"
+API_ALL_URL = "https://www.vang.today/api/prices"
+API_TYPE_URL = "https://www.vang.today/api/prices?type={code}"
 TIMEOUT = 20
 
 GOLD_TYPES = [
@@ -38,36 +39,26 @@ def log(message: str) -> None:
     print(f"[{datetime.utcnow().isoformat()}Z] {message}", flush=True)
 
 
-def fetch_json(code: str) -> dict:
+def http_get_json(url: str):
     headers = {
-        "User-Agent": "Mozilla/5.0 (compatible; AlphaPulseEliteBot/3.0)",
+        "User-Agent": "Mozilla/5.0 (compatible; AlphaPulseEliteBot/3.1)",
         "Accept": "application/json",
         "Cache-Control": "no-cache",
         "Pragma": "no-cache",
     }
-    r = requests.get(f"{API_BASE}?type={code}", headers=headers, timeout=TIMEOUT)
+    r = requests.get(url, headers=headers, timeout=TIMEOUT)
     r.raise_for_status()
-    payload = r.json()
-
-    if not payload or not payload.get("success"):
-        raise RuntimeError(f"vang.today API fail for {code}")
-
-    data = payload.get("data") or []
-    if not data:
-        raise RuntimeError(f"vang.today API empty data for {code}")
-
-    return data[0]
+    return r.json()
 
 
-def parse_time(update_time):
-    if update_time is None:
+def parse_time(ts):
+    if ts is None:
         return datetime.now(timezone.utc)
-
     try:
-        ts = float(update_time)
-        if ts > 1e12:
-            ts = ts / 1000.0
-        return datetime.fromtimestamp(ts, tz=timezone.utc)
+        value = float(ts)
+        if value > 1e12:
+            value = value / 1000.0
+        return datetime.fromtimestamp(value, tz=timezone.utc)
     except Exception:
         return datetime.now(timezone.utc)
 
@@ -164,6 +155,31 @@ def insert_row(cur, row: dict) -> None:
     )
 
 
+def fetch_all_prices():
+    payload = http_get_json(API_ALL_URL)
+    if not payload or not payload.get("success"):
+        raise RuntimeError("vang.today API all prices failed")
+
+    rows = payload.get("data") or []
+    mapping = {}
+    for row in rows:
+        code = row.get("type_code")
+        if code:
+            mapping[code] = row
+    return mapping
+
+
+def fetch_type_price(code: str):
+    payload = http_get_json(API_TYPE_URL.format(code=code))
+    if not payload or not payload.get("success"):
+        return None
+
+    rows = payload.get("data") or []
+    if not rows:
+        return None
+    return rows[0]
+
+
 def main():
     log("Start update_gold")
 
@@ -173,10 +189,22 @@ def main():
     try:
         cleanup_bad_rows(cur)
 
+        all_prices = fetch_all_prices()
         rows = []
+
         for meta in GOLD_TYPES:
-            api_row = fetch_json(meta["code"])
+            api_row = all_prices.get(meta["code"])
+
+            if not api_row:
+                log(f"Fallback fetch by type for {meta['code']}")
+                api_row = fetch_type_price(meta["code"])
+
+            if not api_row:
+                log(f"MISS {meta['code']}")
+                continue
+
             row = build_row(meta, api_row)
+
             if is_valid_row(row):
                 rows.append(row)
                 log(
