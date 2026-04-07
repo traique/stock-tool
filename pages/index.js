@@ -5,7 +5,6 @@ import {
   SunMedium,
   LineChart,
   Search,
-  Star,
   Gem,
   Fuel,
   RefreshCw,
@@ -15,12 +14,15 @@ import {
   BarChart3,
   Wallet,
   TrendingUp,
+  Plus,
+  Trash2,
+  Sparkles,
+  ChevronRight,
 } from "lucide-react";
 
 const TABS = [
   { key: "stocks", label: "Cổ phiếu", icon: LineChart },
   { key: "screener", label: "Screener", icon: Search },
-  { key: "watchlist", label: "Watchlist", icon: Star },
   { key: "gold", label: "Giá vàng", icon: Gem },
   { key: "fuel", label: "Giá xăng", icon: Fuel },
 ];
@@ -33,6 +35,7 @@ export default function Home() {
   const [goldItems, setGoldItems] = useState([]);
   const [fuelItems, setFuelItems] = useState([]);
   const [newSymbol, setNewSymbol] = useState("");
+  const [searchText, setSearchText] = useState("");
   const [loading, setLoading] = useState(true);
   const [status, setStatus] = useState(null);
   const [jobStatus, setJobStatus] = useState(null);
@@ -42,7 +45,15 @@ export default function Home() {
   useEffect(() => {
     const saved =
       typeof window !== "undefined" ? localStorage.getItem("alpha-theme") : null;
-    if (saved === "dark" || saved === "light") setTheme(saved);
+    if (saved === "dark" || saved === "light") {
+      setTheme(saved);
+    } else if (
+      typeof window !== "undefined" &&
+      window.matchMedia &&
+      window.matchMedia("(prefers-color-scheme: dark)").matches
+    ) {
+      setTheme("dark");
+    }
 
     const checkMobile = () => setIsMobile(window.innerWidth <= 820);
     checkMobile();
@@ -85,6 +96,38 @@ export default function Home() {
   );
 
   const latestMarketTime = useMemo(() => status?.last_updated || null, [status]);
+
+  const stockMap = useMemo(() => {
+    const map = {};
+    for (const row of stocks || []) {
+      const key = String(row.symbol || "").trim().toUpperCase();
+      if (key) map[key] = true;
+    }
+    return map;
+  }, [stocks]);
+
+  const filteredItems = useMemo(() => {
+    const q = searchText.trim().toUpperCase();
+    if (!q || !Array.isArray(items)) return items || [];
+    return (items || []).filter((item) => {
+      const symbol = String(item.symbol || "").toUpperCase();
+      const industry = String(item.fundamental?.industry || "").toUpperCase();
+      const name = String(item.fundamental?.company_name || "").toUpperCase();
+      return symbol.includes(q) || industry.includes(q) || name.includes(q);
+    });
+  }, [items, searchText]);
+
+  const stockSummary = useMemo(() => {
+    const source = Array.isArray(items) ? items : [];
+    return {
+      total: source.length,
+      buy: source.filter((x) => String(x.signal_action || "").toUpperCase() === "BUY").length,
+      hold: source.filter((x) => String(x.signal_action || "").toUpperCase() === "HOLD").length,
+      risk: source.filter((x) =>
+        ["SELL", "CUT_LOSS", "TAKE_PROFIT"].includes(String(x.signal_action || "").toUpperCase())
+      ).length,
+    };
+  }, [items]);
 
   const loadStatus = async () => {
     try {
@@ -147,13 +190,19 @@ export default function Home() {
     if (!symbol) return;
 
     try {
-      await fetch("/api/stocks", {
+      const res = await fetch("/api/stocks", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ symbol }),
       });
+
+      if (!res.ok) return;
       setNewSymbol("");
       await loadStocks();
+      if (mode === "stocks" || mode === "screener") {
+        await loadData();
+        await loadStatus();
+      }
     } catch {}
   };
 
@@ -166,7 +215,7 @@ export default function Home() {
       });
       await loadStocks();
 
-      if (mode !== "watchlist") {
+      if (mode === "stocks" || mode === "screener") {
         await loadData();
         await loadStatus();
       }
@@ -242,38 +291,53 @@ export default function Home() {
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="" />
         <link
-          href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700;800&family=Noto+Serif:wght@600;700&display=swap"
+          href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700;800&display=swap"
           rel="stylesheet"
         />
       </Head>
 
       <div style={styles.page}>
-        <div style={styles.auroraOne} />
-        <div style={styles.auroraTwo} />
-
+        <div style={styles.glowOne} />
+        <div style={styles.glowTwo} />
         <div style={styles.shell}>
-          <section style={styles.heroCard}>
-            <button
-              onClick={() => setTheme(theme === "light" ? "dark" : "light")}
-              style={styles.themeButton}
-              aria-label="Đổi giao diện"
-              title="Đổi giao diện"
-            >
-              {theme === "light" ? <Moon size={18} /> : <SunMedium size={18} />}
-            </button>
+          <section style={styles.hero}>
+            <div style={styles.heroTop}>
+              <div>
+                <div style={styles.heroEyebrow}>AlphaPulse · Vietnam Market</div>
+                <h1 style={styles.heroTitle}>Bảng điều khiển cổ phiếu kiểu iOS</h1>
+                <div style={styles.heroSubtitle}>
+                  Theo dõi watchlist, tín hiệu giao dịch, giá vàng và xăng trên một giao diện
+                  gọn, sáng và mượt hơn.
+                </div>
+              </div>
 
-            <div style={styles.heroEyebrow}>LCTA</div>
-            <h1 style={styles.heroTitle}>AlphaPulse Elite</h1>
+              <button
+                onClick={() => setTheme(theme === "light" ? "dark" : "light")}
+                style={styles.themeButton}
+                aria-label="Đổi giao diện"
+                title="Đổi giao diện"
+              >
+                {theme === "light" ? <Moon size={18} /> : <SunMedium size={18} />}
+              </button>
+            </div>
+
+            <div style={styles.heroStats}>
+              <HeroStat styles={styles} label="Watchlist" value={String(stocks.length || 0)} />
+              <HeroStat styles={styles} label="BUY" value={String(stockSummary.buy || 0)} />
+              <HeroStat styles={styles} label="HOLD" value={String(stockSummary.hold || 0)} />
+              <HeroStat styles={styles} label="Cần chú ý" value={String(stockSummary.risk || 0)} />
+            </div>
           </section>
 
-          <div style={styles.tabWrap}>
+          <div style={styles.segmentWrap}>
             {TABS.map((tab) => {
               const Icon = tab.icon;
+              const active = mode === tab.key;
               return (
                 <button
                   key={tab.key}
                   onClick={() => setMode(tab.key)}
-                  style={mode === tab.key ? styles.tabActive : styles.tab}
+                  style={active ? styles.segmentActive : styles.segment}
                 >
                   <Icon size={16} />
                   <span>{tab.label}</span>
@@ -282,87 +346,282 @@ export default function Home() {
             })}
           </div>
 
-          {mode === "watchlist" ? (
-            <section style={styles.card}>
-              <SectionTitle styles={styles} text="Watchlist" />
+          {mode === "stocks" ? (
+            <>
+              <section style={styles.glassCard}>
+                <div style={styles.toolbarTop}>
+                  <SectionTitle styles={styles} text="Danh mục cổ phiếu" />
+                  <div style={styles.toolbarNote}>
+                    Cập nhật: {formatDateTime(latestMarketTime) || "Chưa có dữ liệu"}
+                  </div>
+                </div>
 
-              <div style={styles.watchInputRow}>
-                <input
-                  value={newSymbol}
-                  onChange={(e) => setNewSymbol(e.target.value.toUpperCase())}
-                  placeholder="Nhập mã cổ phiếu, ví dụ FPT"
-                  style={styles.input}
-                />
-                <button onClick={addStock} style={styles.primaryButton}>
-                  Thêm mã
-                </button>
-              </div>
+                <div style={styles.toolbarRow}>
+                  <div style={styles.inputShell}>
+                    <input
+                      value={newSymbol}
+                      onChange={(e) => setNewSymbol(e.target.value.toUpperCase())}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") addStock();
+                      }}
+                      placeholder="Thêm mã, ví dụ FPT"
+                      style={styles.input}
+                    />
+                    <button onClick={addStock} style={styles.addButton}>
+                      <Plus size={16} />
+                      <span>Thêm mã</span>
+                    </button>
+                  </div>
 
-              <div style={styles.watchChips}>
-                {stocks.length === 0 ? (
-                  <div style={styles.muted}>Chưa có mã nào trong watchlist.</div>
-                ) : (
-                  stocks.map((item, idx) => (
-                    <div key={`${item.symbol}-${idx}`} style={styles.watchChip}>
-                      <span>{item.symbol}</span>
-                      <button
-                        onClick={() => removeStock(item.symbol)}
-                        style={styles.removeButton}
-                      >
-                        ×
-                      </button>
-                    </div>
-                  ))
-                )}
-              </div>
-            </section>
+                  <input
+                    value={searchText}
+                    onChange={(e) => setSearchText(e.target.value)}
+                    placeholder="Tìm mã hoặc ngành"
+                    style={styles.searchInput}
+                  />
+                </div>
+
+                <div style={styles.inlineInfoRow}>
+                  <div style={styles.inlinePill}>Đang theo dõi {stocks.length} mã</div>
+                  <div style={styles.inlinePillSoft}>Hiển thị {filteredItems.length} kết quả</div>
+                </div>
+              </section>
+
+              {loading ? (
+                <div style={styles.glassCard}>Đang tải dữ liệu...</div>
+              ) : filteredItems.length === 0 ? (
+                <div style={styles.glassCard}>Chưa có dữ liệu phù hợp.</div>
+              ) : (
+                <section style={styles.stockGrid}>
+                  {filteredItems.map((item, idx) => {
+                    const f = item.fundamental || {};
+                    const hasTradePlan = hasTradePlanData(item);
+
+                    return (
+                      <article key={`${item.symbol}-${idx}`} style={styles.stockCard}>
+                        <div style={styles.stockCardTop}>
+                          <div>
+                            <div style={styles.stockSymbolRow}>
+                              <div style={styles.stockTitle}>{item.symbol}</div>
+                              <span style={getActionStyle(item.signal_action, styles)}>
+                                {item.signal_action || "WATCH"}
+                              </span>
+                            </div>
+                            <div style={styles.stockIndustry}>
+                              {f.company_name || f.industry || "Chưa có thông tin doanh nghiệp"}
+                            </div>
+                            <div style={styles.timestampText}>
+                              {formatDateTime(item.ts) || "Chưa có thời gian cập nhật"}
+                            </div>
+                          </div>
+
+                          <div style={styles.cardTopActions}>
+                            <div style={styles.scoreBadge}>
+                              <div style={styles.scoreBadgeLabel}>Score</div>
+                              <div style={styles.scoreBadgeValue}>{formatNum(item.total_score)}</div>
+                            </div>
+                            {stockMap[item.symbol] ? (
+                              <button
+                                onClick={() => removeStock(item.symbol)}
+                                style={styles.iconDangerButton}
+                                title={`Xóa ${item.symbol}`}
+                              >
+                                <Trash2 size={16} />
+                              </button>
+                            ) : null}
+                          </div>
+                        </div>
+
+                        <div style={styles.badgeRow}>
+                          {item.signal_strength ? (
+                            <span style={styles.softPill}>{item.signal_strength}</span>
+                          ) : null}
+                          {item.setup_type ? (
+                            <span style={styles.softPillBlue}>{item.setup_type}</span>
+                          ) : null}
+                          {item.confidence_score != null ? (
+                            <span style={styles.softPillGreen}>
+                              Conf {formatNum(item.confidence_score)}
+                            </span>
+                          ) : null}
+                        </div>
+
+                        <div style={styles.metricsRow}>
+                          <MetricTile
+                            styles={styles}
+                            title="Giá"
+                            value={formatNum(item.close)}
+                            icon={<Target size={15} />}
+                          />
+                          <MetricTile
+                            styles={styles}
+                            title="RSI"
+                            value={formatNum(item.rsi)}
+                            note={
+                              item.overbought ? "Quá mua" : item.oversold ? "Quá bán" : "Trung tính"
+                            }
+                            icon={<Activity size={15} />}
+                          />
+                          <MetricTile
+                            styles={styles}
+                            title="MACD"
+                            value={formatNum(item.macd)}
+                            note={`Signal ${formatNum(item.macd_signal)}`}
+                            icon={<TrendingUp size={15} />}
+                          />
+                          <MetricTile
+                            styles={styles}
+                            title="Volume"
+                            value={formatNum(item.volume_ratio)}
+                            note={`MA20 ${formatNum(item.volume_ma20)}`}
+                            icon={<BarChart3 size={15} />}
+                          />
+                        </div>
+
+                        <div style={styles.bottomInfoGrid}>
+                          <InfoStrip
+                            styles={styles}
+                            label="MA"
+                            value={`20 ${formatNum(item.ma20)} · 50 ${formatNum(item.ma50)} · 100 ${formatNum(item.ma100)}`}
+                          />
+                          <InfoStrip
+                            styles={styles}
+                            label="Breakout"
+                            value={
+                              item.breakout_55
+                                ? "55 phiên"
+                                : item.breakout_20
+                                ? "20 phiên"
+                                : `MA20 ${formatNum(item.distance_ma20)}%`
+                            }
+                          />
+                        </div>
+
+                        {hasTradePlan ? (
+                          <div style={styles.subCard}>
+                            <div style={styles.subCardHead}>
+                              <div style={styles.subCardTitle}>Kế hoạch giao dịch</div>
+                              <ChevronRight size={16} color={palette.muted} />
+                            </div>
+
+                            <div style={styles.tradePlanGrid}>
+                              <MiniMetric
+                                styles={styles}
+                                title="Điểm vào"
+                                value={formatNum(item.entry_price)}
+                                icon={<Target size={14} />}
+                              />
+                              <MiniMetric
+                                styles={styles}
+                                title="Vùng mua"
+                                value={
+                                  hasMeaningfulNumber(item.entry_zone_low) &&
+                                  hasMeaningfulNumber(item.entry_zone_high)
+                                    ? `${formatNum(item.entry_zone_low)} - ${formatNum(item.entry_zone_high)}`
+                                    : "-"
+                                }
+                                icon={<Wallet size={14} />}
+                              />
+                              <MiniMetric
+                                styles={styles}
+                                title="SL"
+                                value={formatNum(item.stop_loss)}
+                                icon={<Shield size={14} />}
+                              />
+                              <MiniMetric
+                                styles={styles}
+                                title="TP1"
+                                value={formatNum(item.take_profit_1)}
+                                icon={<TrendingUp size={14} />}
+                              />
+                              <MiniMetric
+                                styles={styles}
+                                title="TP2"
+                                value={formatNum(item.take_profit_2)}
+                                icon={<TrendingUp size={14} />}
+                              />
+                              <MiniMetric
+                                styles={styles}
+                                title="R/R"
+                                value={formatNum(item.risk_reward_ratio)}
+                                icon={<BarChart3 size={14} />}
+                              />
+                            </div>
+                          </div>
+                        ) : null}
+
+                        {item.expert_strategy_note || item.expert_note ? (
+                          <div style={styles.noteCard}>
+                            <div style={styles.noteTitle}>
+                              <Sparkles size={15} />
+                              <span>Nhận định</span>
+                            </div>
+                            <div style={styles.noteText}>
+                              {item.expert_strategy_note || item.expert_note}
+                            </div>
+                          </div>
+                        ) : null}
+
+                        {f.pe != null || f.pb != null || f.roe != null ? (
+                          <div style={styles.fundCard}>
+                            <span>PE {formatNum(f.pe)}</span>
+                            <span>PB {formatNum(f.pb)}</span>
+                            <span>ROE {formatNum(f.roe)}</span>
+                          </div>
+                        ) : null}
+                      </article>
+                    );
+                  })}
+                </section>
+              )}
+            </>
           ) : loading ? (
-            <div style={styles.card}>Đang tải dữ liệu...</div>
+            <div style={styles.glassCard}>Đang tải dữ liệu...</div>
           ) : mode === "gold" ? (
             goldItems.length === 0 ? (
-              <div style={styles.card}>Chưa có dữ liệu giá vàng.</div>
+              <div style={styles.glassCard}>Chưa có dữ liệu giá vàng.</div>
             ) : (
-              <section style={styles.contentGrid}>
+              <section style={styles.dualGrid}>
                 {goldItems.map((item, idx) => {
                   const isWorldGold =
                     item.gold_type === "world_xauusd" ||
                     String(item.subtitle || "").toUpperCase() === "XAU/USD";
 
                   return (
-                    <article key={`${item.gold_type}-${idx}`} style={styles.card}>
-                      <div style={styles.cardHead}>
+                    <article key={`${item.gold_type}-${idx}`} style={styles.stockCard}>
+                      <div style={styles.stockCardTop}>
                         <div>
-                          <div style={styles.cardTitle}>{item.display_name || item.gold_type}</div>
-                          <div style={styles.muted}>{item.subtitle || item.source}</div>
+                          <div style={styles.stockTitle}>{item.display_name || item.gold_type}</div>
+                          <div style={styles.stockIndustry}>{item.subtitle || item.source}</div>
                         </div>
-                        <Gem size={18} color={palette.muted} />
+                        <div style={styles.iconBadge}>
+                          <Gem size={16} />
+                        </div>
                       </div>
 
                       {isWorldGold ? (
-                        <div style={styles.singlePriceBox}>
-                          <div style={styles.label}>Giá hiện tại</div>
-                          <div style={styles.bigNumber}>
-                            {formatGoldValue(item.buy_price, item.unit)}
-                          </div>
+                        <div style={styles.singleHeroMetric}>
+                          <div style={styles.metricLabel}>Giá hiện tại</div>
+                          <div style={styles.heroNumber}>{formatGoldValue(item.buy_price, item.unit)}</div>
                           <div style={getGoldChangeStyle(item.change_buy, styles, item.unit)}>
                             {formatGoldChange(item.change_buy, item.unit) || "Không đổi"}
                           </div>
                         </div>
                       ) : (
-                        <div style={styles.dualGrid}>
-                          <ValueBox
+                        <div style={styles.metricsRow}>
+                          <MetricTile
                             styles={styles}
-                            label="Mua vào"
+                            title="Mua vào"
                             value={formatGoldValue(item.buy_price, item.unit)}
-                            change={item.change_buy}
-                            unit={item.unit}
+                            note={formatGoldChange(item.change_buy, item.unit) || "Không đổi"}
+                            icon={<Wallet size={15} />}
                           />
-                          <ValueBox
+                          <MetricTile
                             styles={styles}
-                            label="Bán ra"
+                            title="Bán ra"
                             value={formatGoldValue(item.sell_price, item.unit)}
-                            change={item.change_sell}
-                            unit={item.unit}
+                            note={formatGoldChange(item.change_sell, item.unit) || "Không đổi"}
+                            icon={<TrendingUp size={15} />}
                           />
                         </div>
                       )}
@@ -373,210 +632,99 @@ export default function Home() {
             )
           ) : mode === "fuel" ? (
             fuelItems.length === 0 ? (
-              <div style={styles.card}>Chưa có dữ liệu giá xăng dầu.</div>
+              <div style={styles.glassCard}>Chưa có dữ liệu giá xăng dầu.</div>
             ) : (
-              <section style={styles.contentGrid}>
+              <section style={styles.dualGrid}>
                 {fuelItems.map((item, idx) => (
-                  <article key={`${item.fuel_type}-${idx}`} style={styles.card}>
-                    <div style={styles.cardHead}>
-                      <div style={styles.cardTitle}>{item.fuel_type}</div>
-                      <Fuel size={18} color={palette.muted} />
+                  <article key={`${item.fuel_type}-${idx}`} style={styles.stockCard}>
+                    <div style={styles.stockCardTop}>
+                      <div>
+                        <div style={styles.stockTitle}>{item.fuel_type}</div>
+                        <div style={styles.stockIndustry}>{item.unit || "VND/liter"}</div>
+                      </div>
+                      <div style={styles.iconBadge}>
+                        <Fuel size={16} />
+                      </div>
                     </div>
-                    <div style={styles.bigNumberGreen}>{formatPrice(item.price)}</div>
-                    <div style={styles.muted}>{item.unit || "VND/liter"}</div>
+                    <div style={styles.heroNumberGreen}>{formatPrice(item.price)}</div>
                   </article>
                 ))}
               </section>
             )
           ) : items.length === 0 ? (
-            <div style={styles.card}>Chưa có dữ liệu phù hợp.</div>
+            <div style={styles.glassCard}>Chưa có dữ liệu phù hợp.</div>
           ) : (
-            <section style={styles.stockList}>
-              {items.map((item, idx) => {
-                const f = item.fundamental || {};
-                const hasTradePlan = hasTradePlanData(item);
-
-                return (
-                  <article key={`${item.symbol}-${idx}`} style={styles.card}>
-                    <div style={styles.stockHeader}>
-                      <div>
-                        <div style={styles.stockTitle}>{item.symbol}</div>
-                        <div style={styles.muted}>{f.industry || "Chưa có ngành"}</div>
-                      </div>
-
-                      <div style={styles.scoreBox}>
-                        <div style={styles.scoreLabel}>Score</div>
-                        <div style={styles.scoreValue}>{formatNum(item.total_score)}</div>
+            <section style={styles.stockGrid}>
+              {items.map((item, idx) => (
+                <article key={`${item.symbol}-${idx}`} style={styles.stockCard}>
+                  <div style={styles.stockCardTop}>
+                    <div>
+                      <div style={styles.stockTitle}>{item.symbol}</div>
+                      <div style={styles.stockIndustry}>
+                        {item.fundamental?.industry || "Chưa có ngành"}
                       </div>
                     </div>
+                    <div style={styles.scoreBadge}>
+                      <div style={styles.scoreBadgeLabel}>Score</div>
+                      <div style={styles.scoreBadgeValue}>{formatNum(item.total_score)}</div>
+                    </div>
+                  </div>
 
-                    <div style={styles.badgeRow}>
-                      <span style={getActionStyle(item.signal_action, styles)}>
-                        {item.signal_action || "WATCH"}
+                  <div style={styles.badgeRow}>
+                    <span style={getActionStyle(item.signal_action, styles)}>
+                      {item.signal_action || "WATCH"}
+                    </span>
+                    {item.signal_strength ? (
+                      <span style={styles.softPill}>{item.signal_strength}</span>
+                    ) : null}
+                    {item.confidence_score != null ? (
+                      <span style={styles.softPillGreen}>
+                        Conf {formatNum(item.confidence_score)}
                       </span>
-                      {item.signal_strength ? (
-                        <span style={styles.softPill}>{item.signal_strength}</span>
-                      ) : null}
-                      {item.setup_type ? (
-                        <span style={styles.softPillBlue}>{item.setup_type}</span>
-                      ) : null}
-                      {item.confidence_score != null ? (
-                        <span style={styles.softPillGreen}>
-                          Conf {formatNum(item.confidence_score)}
-                        </span>
-                      ) : null}
-                    </div>
-
-                    <div style={styles.metricGrid}>
-                      <MetricBox
-                        styles={styles}
-                        title="Giá"
-                        value={formatNum(item.close)}
-                        icon={<Target size={15} />}
-                      />
-                      <MetricBox
-                        styles={styles}
-                        title="RSI"
-                        value={formatNum(item.rsi)}
-                        note={
-                          item.overbought ? "Quá mua" : item.oversold ? "Quá bán" : "Trung tính"
-                        }
-                        icon={<Activity size={15} />}
-                      />
-                      <MetricBox
-                        styles={styles}
-                        title="MACD"
-                        value={formatNum(item.macd)}
-                        note={`Signal ${formatNum(item.macd_signal)}`}
-                        icon={<TrendingUp size={15} />}
-                      />
-                      <MetricBox
-                        styles={styles}
-                        title="Volume"
-                        value={formatNum(item.volume_ratio)}
-                        note={`MA20 ${formatNum(item.volume_ma20)}`}
-                        icon={<BarChart3 size={15} />}
-                      />
-                      <MetricBox
-                        styles={styles}
-                        title="MA"
-                        value={`20 ${formatNum(item.ma20)}`}
-                        note={`50 ${formatNum(item.ma50)} · 100 ${formatNum(item.ma100)}`}
-                        icon={<LineChart size={15} />}
-                      />
-                      <MetricBox
-                        styles={styles}
-                        title="Breakout"
-                        value={item.breakout_55 ? "55 phiên" : item.breakout_20 ? "20 phiên" : "-"}
-                        note={`MA20 ${formatNum(item.distance_ma20)}%`}
-                        icon={<Target size={15} />}
-                      />
-                    </div>
-
-                    {hasTradePlan ? (
-                      <div style={styles.subCard}>
-                        <div style={styles.subCardTitle}>Kế hoạch giao dịch</div>
-                        <div style={styles.metricGridCompact}>
-                          <MetricBox
-                            styles={styles}
-                            title="Điểm vào"
-                            value={formatNum(item.entry_price)}
-                            compact
-                            icon={<Target size={15} />}
-                          />
-                          <MetricBox
-                            styles={styles}
-                            title="Vùng mua"
-                            value={
-                              hasMeaningfulNumber(item.entry_zone_low) &&
-                              hasMeaningfulNumber(item.entry_zone_high)
-                                ? `${formatNum(item.entry_zone_low)} - ${formatNum(
-                                    item.entry_zone_high
-                                  )}`
-                                : "-"
-                            }
-                            compact
-                            icon={<Wallet size={15} />}
-                          />
-                          <MetricBox
-                            styles={styles}
-                            title="SL"
-                            value={formatNum(item.stop_loss)}
-                            compact
-                            icon={<Shield size={15} />}
-                          />
-                          <MetricBox
-                            styles={styles}
-                            title="TP1"
-                            value={formatNum(item.take_profit_1)}
-                            compact
-                            icon={<TrendingUp size={15} />}
-                          />
-                          <MetricBox
-                            styles={styles}
-                            title="TP2"
-                            value={formatNum(item.take_profit_2)}
-                            compact
-                            icon={<TrendingUp size={15} />}
-                          />
-                          <MetricBox
-                            styles={styles}
-                            title="Trailing"
-                            value={formatNum(item.trailing_stop)}
-                            compact
-                            icon={<RefreshCw size={15} />}
-                          />
-                          <MetricBox
-                            styles={styles}
-                            title="R/R"
-                            value={formatNum(item.risk_reward_ratio)}
-                            compact
-                            icon={<BarChart3 size={15} />}
-                          />
-                          <MetricBox
-                            styles={styles}
-                            title="Tỷ trọng"
-                            value={
-                              hasMeaningfulNumber(item.position_size_pct)
-                                ? `${formatNum(item.position_size_pct)}%`
-                                : "-"
-                            }
-                            compact
-                            icon={<Wallet size={15} />}
-                          />
-                        </div>
-                      </div>
                     ) : null}
+                  </div>
 
-                    {item.expert_strategy_note || item.expert_note ? (
-                      <div style={styles.subCard}>
-                        <div style={styles.subCardTitle}>
-                          {item.expert_strategy_note ? "Nhận định chuyên gia" : "Nhận định"}
-                        </div>
-                        <div style={styles.noteText}>
-                          {item.expert_strategy_note || item.expert_note}
-                        </div>
-                      </div>
-                    ) : null}
-
-                    {f.pe != null || f.pb != null || f.roe != null ? (
-                      <div style={styles.subCard}>
-                        <div style={styles.subCardTitle}>Cơ bản</div>
-                        <div style={styles.fundRow}>
-                          <span>PE: {formatNum(f.pe)}</span>
-                          <span>PB: {formatNum(f.pb)}</span>
-                          <span>ROE: {formatNum(f.roe)}</span>
-                        </div>
-                      </div>
-                    ) : null}
-                  </article>
-                );
-              })}
+                  <div style={styles.metricsRow}>
+                    <MetricTile
+                      styles={styles}
+                      title="Giá"
+                      value={formatNum(item.close)}
+                      icon={<Target size={15} />}
+                    />
+                    <MetricTile
+                      styles={styles}
+                      title="RSI"
+                      value={formatNum(item.rsi)}
+                      note={`R/R ${formatNum(item.risk_reward_ratio)}`}
+                      icon={<Activity size={15} />}
+                    />
+                    <MetricTile
+                      styles={styles}
+                      title="MACD"
+                      value={formatNum(item.macd)}
+                      note={`Signal ${formatNum(item.macd_signal)}`}
+                      icon={<TrendingUp size={15} />}
+                    />
+                    <MetricTile
+                      styles={styles}
+                      title="Volume"
+                      value={formatNum(item.volume_ratio)}
+                      note={`MA20 ${formatNum(item.volume_ma20)}`}
+                      icon={<BarChart3 size={15} />}
+                    />
+                  </div>
+                </article>
+              ))}
             </section>
           )}
 
-          <section style={styles.card}>
-            <SectionTitle styles={styles} text="Cập nhật dữ liệu" />
+          <section style={styles.glassCard}>
+            <div style={styles.toolbarTop}>
+              <SectionTitle styles={styles} text="Cập nhật dữ liệu" />
+              <div style={styles.toolbarNote}>
+                {jobRunning ? "Đang chạy workflow..." : "Sẵn sàng cập nhật"}
+              </div>
+            </div>
 
             <div style={styles.updateGrid}>
               <button
@@ -607,7 +755,7 @@ export default function Home() {
               </button>
 
               <button
-                style={styles.primaryButton}
+                style={styles.primaryButtonWide}
                 onClick={() => runUpdate("all")}
                 disabled={jobRunning}
               >
@@ -631,11 +779,9 @@ export default function Home() {
                   />
                 </div>
                 <div style={styles.noteText}>{jobStatus.message || "Đang xử lý..."}</div>
-                <div style={styles.muted}>Trạng thái: {jobStatus.status || "queued"}</div>
+                <div style={styles.timestampText}>Trạng thái: {jobStatus.status || "queued"}</div>
               </div>
-            ) : (
-              <div style={styles.muted}>Chưa có tiến trình cập nhật nào được hiển thị.</div>
-            )}
+            ) : null}
           </section>
 
           <section style={styles.statusGrid}>
@@ -670,6 +816,15 @@ function SectionTitle({ styles, text }) {
   return <div style={styles.sectionTitle}>{text}</div>;
 }
 
+function HeroStat({ styles, label, value }) {
+  return (
+    <div style={styles.heroStat}>
+      <div style={styles.heroStatLabel}>{label}</div>
+      <div style={styles.heroStatValue}>{value}</div>
+    </div>
+  );
+}
+
 function StatusCard({ styles, title, value }) {
   return (
     <div style={styles.statusCard}>
@@ -679,27 +834,36 @@ function StatusCard({ styles, title, value }) {
   );
 }
 
-function ValueBox({ styles, label, value, change, unit }) {
+function MetricTile({ styles, title, value, note, icon }) {
   return (
-    <div style={styles.valueBox}>
-      <div style={styles.label}>{label}</div>
-      <div style={styles.valueBoxNumber}>{value}</div>
-      <div style={getGoldChangeStyle(change, styles, unit)}>
-        {formatGoldChange(change, unit) || "Không đổi"}
+    <div style={styles.metricTile}>
+      <div style={styles.metricTop}>
+        <div style={styles.metricLabel}>{title}</div>
+        <div style={styles.metricIcon}>{icon}</div>
       </div>
+      <div style={styles.metricValue}>{value}</div>
+      {note ? <div style={styles.metricNote}>{note}</div> : null}
     </div>
   );
 }
 
-function MetricBox({ styles, title, value, note, compact = false, icon = null }) {
+function MiniMetric({ styles, title, value, icon }) {
   return (
-    <div style={compact ? styles.metricBoxCompact : styles.metricBox}>
+    <div style={styles.miniMetric}>
       <div style={styles.metricTop}>
-        <div style={styles.label}>{title}</div>
-        {icon ? <div style={styles.metricIcon}>{icon}</div> : null}
+        <div style={styles.metricLabel}>{title}</div>
+        <div style={styles.metricIcon}>{icon}</div>
       </div>
-      <div style={compact ? styles.metricCompactValue : styles.metricValue}>{value}</div>
-      {note ? <div style={styles.metricNote}>{note}</div> : null}
+      <div style={styles.miniMetricValue}>{value}</div>
+    </div>
+  );
+}
+
+function InfoStrip({ styles, label, value }) {
+  return (
+    <div style={styles.infoStrip}>
+      <div style={styles.infoStripLabel}>{label}</div>
+      <div style={styles.infoStripValue}>{value}</div>
     </div>
   );
 }
@@ -846,35 +1010,45 @@ function hasTradePlanData(item) {
 function getPalette(theme) {
   if (theme === "dark") {
     return {
-      bg: "#07111f",
-      bgSoft: "#0d1728",
-      card: "rgba(14,23,38,0.88)",
-      cardSoft: "rgba(18,28,45,0.94)",
-      line: "rgba(148,163,184,0.14)",
+      bg: "#071018",
+      bg2: "#0b1520",
+      surface: "rgba(14, 22, 34, 0.74)",
+      surfaceStrong: "rgba(17, 28, 42, 0.92)",
+      surfaceSoft: "rgba(20, 31, 46, 0.78)",
+      line: "rgba(148, 163, 184, 0.16)",
+      lineStrong: "rgba(148, 163, 184, 0.22)",
       text: "#f8fafc",
-      subtext: "#dbe4f0",
-      muted: "#93a3b8",
-      primary: "#3b82f6",
-      primaryStrong: "#1d4ed8",
-      shadow: "rgba(2,6,23,0.42)",
-      serif: "'Noto Serif', Georgia, serif",
+      subtext: "#d9e2ee",
+      muted: "#94a3b8",
+      primary: "#0a84ff",
+      primaryStrong: "#0066d6",
+      success: "#22c55e",
+      danger: "#ef4444",
+      orange: "#f97316",
+      shadow: "rgba(2, 8, 23, 0.42)",
+      glass: "blur(18px)",
       sans: "'Be Vietnam Pro', Inter, Arial, sans-serif",
     };
   }
 
   return {
-    bg: "#f3f5fb",
-    bgSoft: "#eef2f8",
-    card: "rgba(255,255,255,0.9)",
-    cardSoft: "rgba(248,250,252,0.98)",
-    line: "rgba(148,163,184,0.20)",
+    bg: "#eef3fb",
+    bg2: "#f7f9fd",
+    surface: "rgba(255, 255, 255, 0.72)",
+    surfaceStrong: "rgba(255, 255, 255, 0.94)",
+    surfaceSoft: "rgba(248, 250, 252, 0.9)",
+    line: "rgba(148, 163, 184, 0.20)",
+    lineStrong: "rgba(148, 163, 184, 0.28)",
     text: "#0f172a",
     subtext: "#334155",
     muted: "#64748b",
-    primary: "#2563eb",
-    primaryStrong: "#1d4ed8",
-    shadow: "rgba(15,23,42,0.08)",
-    serif: "'Noto Serif', Georgia, serif",
+    primary: "#0a84ff",
+    primaryStrong: "#0066d6",
+    success: "#16a34a",
+    danger: "#dc2626",
+    orange: "#ea580c",
+    shadow: "rgba(15, 23, 42, 0.10)",
+    glass: "blur(16px)",
     sans: "'Be Vietnam Pro', Inter, Arial, sans-serif",
   };
 }
@@ -883,303 +1057,368 @@ function createStyles(p, isMobile) {
   return {
     page: {
       minHeight: "100vh",
-      background: `linear-gradient(180deg, ${p.bg}, ${p.bgSoft})`,
+      background: `linear-gradient(180deg, ${p.bg}, ${p.bg2})`,
       padding: isMobile ? 12 : 20,
       position: "relative",
       overflowX: "hidden",
       fontFamily: p.sans,
     },
-    auroraOne: {
+    glowOne: {
       position: "fixed",
       top: -40,
-      left: -40,
+      left: -50,
       width: 220,
       height: 220,
       borderRadius: "50%",
-      background: "rgba(59,130,246,0.12)",
+      background: "rgba(10,132,255,0.16)",
       filter: "blur(80px)",
       pointerEvents: "none",
     },
-    auroraTwo: {
+    glowTwo: {
       position: "fixed",
-      right: -40,
+      right: -60,
       bottom: -40,
-      width: 240,
-      height: 240,
+      width: 260,
+      height: 260,
       borderRadius: "50%",
-      background: "rgba(99,102,241,0.10)",
+      background: "rgba(125, 211, 252, 0.14)",
       filter: "blur(90px)",
       pointerEvents: "none",
     },
     shell: {
-      maxWidth: 1180,
+      maxWidth: 1280,
       margin: "0 auto",
       position: "relative",
       zIndex: 1,
       display: "grid",
-      gap: 14,
+      gap: 16,
     },
-    heroCard: {
-      position: "relative",
-      background: p.card,
+    hero: {
+      background: p.surface,
       border: `1px solid ${p.line}`,
-      borderRadius: 28,
+      borderRadius: 32,
       padding: isMobile ? 18 : 24,
+      backdropFilter: p.glass,
       boxShadow: `0 20px 40px ${p.shadow}`,
-      backdropFilter: "blur(14px)",
-      minHeight: isMobile ? 120 : 150,
     },
-    themeButton: {
-      position: "absolute",
-      top: 16,
-      right: 16,
-      width: 42,
-      height: 42,
-      borderRadius: 14,
-      border: `1px solid ${p.line}`,
-      background: p.cardSoft,
-      color: p.text,
-      display: "inline-flex",
-      alignItems: "center",
-      justifyContent: "center",
-      cursor: "pointer",
-      boxShadow: `0 10px 20px ${p.shadow}`,
+    heroTop: {
+      display: "grid",
+      gridTemplateColumns: isMobile ? "1fr" : "1fr auto",
+      gap: 16,
+      alignItems: "start",
     },
     heroEyebrow: {
-      color: p.muted,
+      color: p.primary,
       fontSize: 12,
       lineHeight: 1.4,
-      fontWeight: 700,
-      letterSpacing: 1,
+      fontWeight: 800,
+      letterSpacing: 0.6,
       textTransform: "uppercase",
       marginBottom: 10,
     },
     heroTitle: {
       margin: 0,
       color: p.text,
-      fontFamily: p.serif,
-      fontSize: isMobile ? 40 : 56,
-      lineHeight: 1.02,
-      letterSpacing: -0.5,
-      paddingRight: 54,
-    },
-    tabWrap: {
-      display: "flex",
-      flexWrap: "wrap",
-      gap: 8,
-    },
-    tab: {
-      border: `1px solid ${p.line}`,
-      background: p.card,
-      color: p.text,
-      padding: "11px 14px",
-      borderRadius: 999,
-      cursor: "pointer",
-      fontSize: 14,
-      lineHeight: 1.5,
-      fontWeight: 700,
-      display: "inline-flex",
-      alignItems: "center",
-      gap: 8,
-      boxShadow: `0 8px 18px ${p.shadow}`,
-    },
-    tabActive: {
-      border: "1px solid transparent",
-      background: `linear-gradient(135deg, ${p.primary}, ${p.primaryStrong})`,
-      color: "#fff",
-      padding: "11px 14px",
-      borderRadius: 999,
-      cursor: "pointer",
-      fontSize: 14,
-      lineHeight: 1.5,
+      fontSize: isMobile ? 34 : 48,
+      lineHeight: 1.03,
       fontWeight: 800,
+      letterSpacing: -1,
+    },
+    heroSubtitle: {
+      color: p.subtext,
+      fontSize: isMobile ? 14 : 16,
+      lineHeight: 1.7,
+      maxWidth: 760,
+      marginTop: 12,
+    },
+    themeButton: {
+      width: 48,
+      height: 48,
+      borderRadius: 18,
+      border: `1px solid ${p.line}`,
+      background: p.surfaceStrong,
+      color: p.text,
       display: "inline-flex",
       alignItems: "center",
-      gap: 8,
-      boxShadow: `0 12px 22px ${p.shadow}`,
+      justifyContent: "center",
+      cursor: "pointer",
+      boxShadow: `0 10px 22px ${p.shadow}`,
+      backdropFilter: p.glass,
     },
-    contentGrid: {
+    heroStats: {
       display: "grid",
-      gridTemplateColumns: isMobile ? "1fr" : "repeat(2, minmax(0, 1fr))",
-      gap: 14,
+      gridTemplateColumns: isMobile ? "repeat(2, minmax(0, 1fr))" : "repeat(4, minmax(0, 1fr))",
+      gap: 10,
+      marginTop: 18,
     },
-    stockList: {
-      display: "grid",
-      gap: 14,
-    },
-    card: {
-      background: p.card,
+    heroStat: {
+      background: p.surfaceStrong,
       border: `1px solid ${p.line}`,
-      borderRadius: 28,
-      padding: isMobile ? 16 : 20,
-      boxShadow: `0 20px 40px ${p.shadow}`,
-      backdropFilter: "blur(14px)",
-      minWidth: 0,
+      borderRadius: 22,
+      padding: 14,
+      backdropFilter: p.glass,
     },
-    cardHead: {
-      display: "flex",
-      alignItems: "flex-start",
-      justifyContent: "space-between",
-      gap: 12,
-      marginBottom: 14,
-    },
-    cardTitle: {
-      color: p.text,
-      fontFamily: p.serif,
-      fontSize: isMobile ? 28 : 32,
-      lineHeight: 1.1,
-      fontWeight: 700,
-    },
-    label: {
+    heroStatLabel: {
       color: p.muted,
       fontSize: 12,
       lineHeight: 1.4,
       fontWeight: 700,
       marginBottom: 8,
     },
-    muted: {
-      color: p.muted,
-      fontSize: 12,
-      lineHeight: 1.6,
-    },
-    singlePriceBox: {
-      borderRadius: 22,
-      background: p.cardSoft,
-      border: `1px solid ${p.line}`,
-      padding: 16,
-    },
-    dualGrid: {
-      display: "grid",
-      gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
-      gap: 10,
-    },
-    valueBox: {
-      borderRadius: 22,
-      background: p.cardSoft,
-      border: `1px solid ${p.line}`,
-      padding: 14,
-      minWidth: 0,
-    },
-    bigNumber: {
+    heroStatValue: {
       color: p.text,
-      fontFamily: p.serif,
-      fontSize: isMobile ? 28 : 34,
+      fontSize: isMobile ? 22 : 26,
       lineHeight: 1.1,
-      fontWeight: 700,
-      wordBreak: "break-word",
+      fontWeight: 800,
     },
-    bigNumberGreen: {
-      color: "#15803d",
-      fontFamily: p.serif,
-      fontSize: isMobile ? 28 : 34,
-      lineHeight: 1.1,
-      fontWeight: 700,
-      wordBreak: "break-word",
+    segmentWrap: {
+      display: "flex",
+      flexWrap: "wrap",
+      gap: 8,
+      padding: 6,
+      borderRadius: 999,
+      background: p.surface,
+      border: `1px solid ${p.line}`,
+      backdropFilter: p.glass,
+      boxShadow: `0 16px 30px ${p.shadow}`,
+      width: "fit-content",
+      maxWidth: "100%",
     },
-    valueBoxNumber: {
+    segment: {
+      border: "none",
+      background: "transparent",
+      color: p.subtext,
+      padding: "10px 14px",
+      borderRadius: 999,
+      cursor: "pointer",
+      fontSize: 14,
+      lineHeight: 1.4,
+      fontWeight: 700,
+      display: "inline-flex",
+      alignItems: "center",
+      gap: 8,
+    },
+    segmentActive: {
+      border: "none",
+      background: p.surfaceStrong,
       color: p.text,
-      fontSize: isMobile ? 20 : 24,
-      lineHeight: 1.25,
-      fontWeight: 800,
-      wordBreak: "break-word",
-    },
-    changeUp: {
-      marginTop: 8,
-      color: "#15803d",
+      padding: "10px 14px",
+      borderRadius: 999,
+      cursor: "pointer",
       fontSize: 14,
-      lineHeight: 1.5,
+      lineHeight: 1.4,
       fontWeight: 800,
-      minHeight: 21,
+      display: "inline-flex",
+      alignItems: "center",
+      gap: 8,
+      boxShadow: `0 8px 18px ${p.shadow}`,
     },
-    changeDown: {
-      marginTop: 8,
-      color: "#b91c1c",
-      fontSize: 14,
-      lineHeight: 1.5,
-      fontWeight: 800,
-      minHeight: 21,
+    glassCard: {
+      background: p.surface,
+      border: `1px solid ${p.line}`,
+      borderRadius: 30,
+      padding: isMobile ? 16 : 20,
+      backdropFilter: p.glass,
+      boxShadow: `0 20px 36px ${p.shadow}`,
     },
-    changeNeutral: {
-      marginTop: 8,
-      color: p.muted,
-      fontSize: 14,
-      lineHeight: 1.5,
-      fontWeight: 700,
-      minHeight: 21,
-    },
-    stockHeader: {
+    toolbarTop: {
       display: "grid",
       gridTemplateColumns: isMobile ? "1fr" : "1fr auto",
       gap: 12,
-      alignItems: "start",
-      marginBottom: 14,
+      alignItems: "center",
     },
-    stockTitle: {
-      color: p.text,
-      fontFamily: p.serif,
-      fontSize: isMobile ? 32 : 38,
-      lineHeight: 1.04,
-      fontWeight: 700,
-    },
-    scoreBox: {
-      borderRadius: 20,
-      background: p.cardSoft,
-      border: `1px solid ${p.line}`,
-      padding: "12px 14px",
-      minWidth: isMobile ? 0 : 108,
+    toolbarNote: {
+      color: p.muted,
+      fontSize: 12,
+      lineHeight: 1.5,
       textAlign: isMobile ? "left" : "right",
     },
-    scoreLabel: {
-      color: p.muted,
+    toolbarRow: {
+      display: "grid",
+      gridTemplateColumns: isMobile ? "1fr" : "1.4fr 1fr",
+      gap: 12,
+      marginTop: 16,
+    },
+    inputShell: {
+      display: "grid",
+      gridTemplateColumns: isMobile ? "1fr" : "1fr auto",
+      gap: 10,
+    },
+    input: {
+      width: "100%",
+      boxSizing: "border-box",
+      padding: "15px 16px",
+      borderRadius: 20,
+      border: `1px solid ${p.lineStrong}`,
+      background: p.surfaceStrong,
+      color: p.text,
+      fontSize: 14,
+      lineHeight: 1.4,
+      outline: "none",
+      fontFamily: p.sans,
+      backdropFilter: p.glass,
+    },
+    searchInput: {
+      width: "100%",
+      boxSizing: "border-box",
+      padding: "15px 16px",
+      borderRadius: 20,
+      border: `1px solid ${p.lineStrong}`,
+      background: p.surfaceStrong,
+      color: p.text,
+      fontSize: 14,
+      lineHeight: 1.4,
+      outline: "none",
+      fontFamily: p.sans,
+      backdropFilter: p.glass,
+    },
+    addButton: {
+      border: "none",
+      background: `linear-gradient(135deg, ${p.primary}, ${p.primaryStrong})`,
+      color: "#fff",
+      padding: "0 16px",
+      borderRadius: 20,
+      cursor: "pointer",
+      fontSize: 14,
+      lineHeight: 1.4,
+      fontWeight: 800,
+      display: "inline-flex",
+      alignItems: "center",
+      justifyContent: "center",
+      gap: 8,
+      minHeight: 50,
+      boxShadow: `0 14px 28px ${p.shadow}`,
+    },
+    inlineInfoRow: {
+      display: "flex",
+      flexWrap: "wrap",
+      gap: 10,
+      marginTop: 14,
+    },
+    inlinePill: {
+      background: "rgba(10,132,255,0.12)",
+      color: p.primary,
+      borderRadius: 999,
+      padding: "8px 12px",
+      fontSize: 12,
+      lineHeight: 1.4,
+      fontWeight: 800,
+    },
+    inlinePillSoft: {
+      background: p.surfaceStrong,
+      color: p.subtext,
+      border: `1px solid ${p.line}`,
+      borderRadius: 999,
+      padding: "8px 12px",
       fontSize: 12,
       lineHeight: 1.4,
       fontWeight: 700,
     },
-    scoreValue: {
+    stockGrid: {
+      display: "grid",
+      gridTemplateColumns: isMobile ? "1fr" : "repeat(2, minmax(0, 1fr))",
+      gap: 14,
+    },
+    stockCard: {
+      background: p.surface,
+      border: `1px solid ${p.line}`,
+      borderRadius: 30,
+      padding: isMobile ? 16 : 18,
+      backdropFilter: p.glass,
+      boxShadow: `0 20px 36px ${p.shadow}`,
+      minWidth: 0,
+    },
+    stockCardTop: {
+      display: "grid",
+      gridTemplateColumns: "1fr auto",
+      gap: 12,
+      alignItems: "start",
+    },
+    stockSymbolRow: {
+      display: "flex",
+      flexWrap: "wrap",
+      gap: 8,
+      alignItems: "center",
+    },
+    stockTitle: {
       color: p.text,
-      fontFamily: p.serif,
-      fontSize: isMobile ? 24 : 30,
-      lineHeight: 1.1,
+      fontSize: isMobile ? 26 : 30,
+      lineHeight: 1.05,
+      fontWeight: 800,
+      letterSpacing: -0.5,
+    },
+    stockIndustry: {
+      color: p.subtext,
+      fontSize: 13,
+      lineHeight: 1.6,
+      marginTop: 8,
+      wordBreak: "break-word",
+    },
+    timestampText: {
+      color: p.muted,
+      fontSize: 12,
+      lineHeight: 1.5,
+      marginTop: 8,
+    },
+    cardTopActions: {
+      display: "flex",
+      alignItems: "flex-start",
+      gap: 8,
+    },
+    scoreBadge: {
+      background: p.surfaceStrong,
+      border: `1px solid ${p.line}`,
+      borderRadius: 20,
+      padding: "10px 12px",
+      minWidth: 94,
+      textAlign: "right",
+    },
+    scoreBadgeLabel: {
+      color: p.muted,
+      fontSize: 11,
+      lineHeight: 1.4,
       fontWeight: 700,
+    },
+    scoreBadgeValue: {
+      color: p.text,
+      fontSize: 22,
+      lineHeight: 1.1,
+      fontWeight: 800,
       marginTop: 4,
+    },
+    iconDangerButton: {
+      width: 38,
+      height: 38,
+      borderRadius: 14,
+      border: "none",
+      background: "rgba(239,68,68,0.12)",
+      color: p.danger,
+      display: "inline-flex",
+      alignItems: "center",
+      justifyContent: "center",
+      cursor: "pointer",
+    },
+    iconBadge: {
+      width: 38,
+      height: 38,
+      borderRadius: 14,
+      background: p.surfaceStrong,
+      border: `1px solid ${p.line}`,
+      color: p.muted,
+      display: "inline-flex",
+      alignItems: "center",
+      justifyContent: "center",
     },
     badgeRow: {
       display: "flex",
       flexWrap: "wrap",
       gap: 8,
+      marginTop: 14,
       marginBottom: 14,
-    },
-    softPill: {
-      background: p.cardSoft,
-      border: `1px solid ${p.line}`,
-      color: p.subtext,
-      borderRadius: 999,
-      padding: "7px 10px",
-      fontSize: 12,
-      lineHeight: 1.4,
-      fontWeight: 700,
-    },
-    softPillBlue: {
-      background: "rgba(59,130,246,0.12)",
-      color: "#2563eb",
-      borderRadius: 999,
-      padding: "7px 10px",
-      fontSize: 12,
-      lineHeight: 1.4,
-      fontWeight: 700,
-    },
-    softPillGreen: {
-      background: "rgba(34,197,94,0.12)",
-      color: "#15803d",
-      borderRadius: 999,
-      padding: "7px 10px",
-      fontSize: 12,
-      lineHeight: 1.4,
-      fontWeight: 700,
     },
     actionBuy: {
       background: "rgba(34,197,94,0.14)",
-      color: "#15803d",
+      color: p.success,
       borderRadius: 999,
       padding: "8px 12px",
       fontSize: 12,
@@ -1187,8 +1426,8 @@ function createStyles(p, isMobile) {
       fontWeight: 800,
     },
     actionHold: {
-      background: "rgba(59,130,246,0.14)",
-      color: "#2563eb",
+      background: "rgba(10,132,255,0.14)",
+      color: p.primary,
       borderRadius: 999,
       padding: "8px 12px",
       fontSize: 12,
@@ -1197,7 +1436,7 @@ function createStyles(p, isMobile) {
     },
     actionTp: {
       background: "rgba(249,115,22,0.14)",
-      color: "#c2410c",
+      color: p.orange,
       borderRadius: 999,
       padding: "8px 12px",
       fontSize: 12,
@@ -1206,7 +1445,7 @@ function createStyles(p, isMobile) {
     },
     actionSell: {
       background: "rgba(239,68,68,0.14)",
-      color: "#b91c1c",
+      color: p.danger,
       borderRadius: 999,
       padding: "8px 12px",
       fontSize: 12,
@@ -1215,35 +1454,51 @@ function createStyles(p, isMobile) {
     },
     actionWatch: {
       background: "rgba(245,158,11,0.16)",
-      color: "#92400e",
+      color: "#b45309",
       borderRadius: 999,
       padding: "8px 12px",
       fontSize: 12,
       lineHeight: 1.4,
       fontWeight: 800,
     },
-    metricGrid: {
-      display: "grid",
-      gridTemplateColumns: isMobile ? "repeat(2, minmax(0, 1fr))" : "repeat(3, minmax(0, 1fr))",
-      gap: 10,
+    softPill: {
+      background: p.surfaceStrong,
+      border: `1px solid ${p.line}`,
+      color: p.subtext,
+      borderRadius: 999,
+      padding: "8px 12px",
+      fontSize: 12,
+      lineHeight: 1.4,
+      fontWeight: 700,
     },
-    metricGridCompact: {
+    softPillBlue: {
+      background: "rgba(10,132,255,0.12)",
+      color: p.primary,
+      borderRadius: 999,
+      padding: "8px 12px",
+      fontSize: 12,
+      lineHeight: 1.4,
+      fontWeight: 700,
+    },
+    softPillGreen: {
+      background: "rgba(34,197,94,0.12)",
+      color: p.success,
+      borderRadius: 999,
+      padding: "8px 12px",
+      fontSize: 12,
+      lineHeight: 1.4,
+      fontWeight: 700,
+    },
+    metricsRow: {
       display: "grid",
       gridTemplateColumns: isMobile ? "repeat(2, minmax(0, 1fr))" : "repeat(4, minmax(0, 1fr))",
       gap: 10,
     },
-    metricBox: {
-      borderRadius: 20,
-      background: p.cardSoft,
+    metricTile: {
+      background: p.surfaceStrong,
       border: `1px solid ${p.line}`,
+      borderRadius: 22,
       padding: 14,
-      minWidth: 0,
-    },
-    metricBoxCompact: {
-      borderRadius: 18,
-      background: p.cardSoft,
-      border: `1px solid ${p.line}`,
-      padding: 12,
       minWidth: 0,
     },
     metricTop: {
@@ -1251,7 +1506,7 @@ function createStyles(p, isMobile) {
       alignItems: "center",
       justifyContent: "space-between",
       gap: 8,
-      marginBottom: 2,
+      marginBottom: 8,
     },
     metricIcon: {
       color: p.muted,
@@ -1259,89 +1514,214 @@ function createStyles(p, isMobile) {
       alignItems: "center",
       justifyContent: "center",
     },
+    metricLabel: {
+      color: p.muted,
+      fontSize: 12,
+      lineHeight: 1.4,
+      fontWeight: 700,
+    },
     metricValue: {
       color: p.text,
-      fontSize: isMobile ? 18 : 20,
-      lineHeight: 1.25,
-      fontWeight: 800,
-      wordBreak: "break-word",
-    },
-    metricCompactValue: {
-      color: p.text,
-      fontSize: 15,
-      lineHeight: 1.35,
+      fontSize: 18,
+      lineHeight: 1.2,
       fontWeight: 800,
       wordBreak: "break-word",
     },
     metricNote: {
       color: p.muted,
       fontSize: 12,
-      lineHeight: 1.6,
+      lineHeight: 1.55,
       marginTop: 6,
       wordBreak: "break-word",
     },
-    subCard: {
-      marginTop: 14,
-      borderRadius: 22,
-      background: p.cardSoft,
+    bottomInfoGrid: {
+      display: "grid",
+      gridTemplateColumns: "1fr",
+      gap: 10,
+      marginTop: 10,
+    },
+    infoStrip: {
+      background: p.surfaceStrong,
       border: `1px solid ${p.line}`,
+      borderRadius: 18,
+      padding: "12px 14px",
+    },
+    infoStripLabel: {
+      color: p.muted,
+      fontSize: 12,
+      lineHeight: 1.4,
+      fontWeight: 700,
+      marginBottom: 6,
+    },
+    infoStripValue: {
+      color: p.subtext,
+      fontSize: 13,
+      lineHeight: 1.6,
+      fontWeight: 700,
+      wordBreak: "break-word",
+    },
+    subCard: {
+      marginTop: 12,
+      background: p.surfaceStrong,
+      border: `1px solid ${p.line}`,
+      borderRadius: 24,
       padding: 14,
+    },
+    subCardHead: {
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "space-between",
+      gap: 10,
+      marginBottom: 10,
     },
     subCardTitle: {
       color: p.text,
-      fontFamily: p.serif,
-      fontSize: 20,
+      fontSize: 18,
       lineHeight: 1.2,
-      fontWeight: 700,
-      marginBottom: 10,
+      fontWeight: 800,
+    },
+    tradePlanGrid: {
+      display: "grid",
+      gridTemplateColumns: isMobile ? "repeat(2, minmax(0, 1fr))" : "repeat(3, minmax(0, 1fr))",
+      gap: 10,
+    },
+    miniMetric: {
+      background: p.surfaceSoft,
+      border: `1px solid ${p.line}`,
+      borderRadius: 18,
+      padding: 12,
+      minWidth: 0,
+    },
+    miniMetricValue: {
+      color: p.text,
+      fontSize: 14,
+      lineHeight: 1.45,
+      fontWeight: 800,
+      wordBreak: "break-word",
+    },
+    noteCard: {
+      marginTop: 12,
+      background: p.surfaceStrong,
+      border: `1px solid ${p.line}`,
+      borderRadius: 22,
+      padding: 14,
+    },
+    noteTitle: {
+      color: p.text,
+      display: "inline-flex",
+      alignItems: "center",
+      gap: 8,
+      fontSize: 14,
+      lineHeight: 1.5,
+      fontWeight: 800,
+      marginBottom: 8,
     },
     noteText: {
       color: p.subtext,
       fontSize: 14,
-      lineHeight: 1.75,
+      lineHeight: 1.7,
     },
-    fundRow: {
+    fundCard: {
+      marginTop: 12,
       display: "flex",
       flexWrap: "wrap",
-      gap: 14,
-      color: p.text,
-      fontSize: 14,
-      lineHeight: 1.6,
+      gap: 10,
+      background: p.surfaceStrong,
+      border: `1px solid ${p.line}`,
+      borderRadius: 18,
+      padding: "12px 14px",
+      color: p.subtext,
+      fontSize: 13,
+      lineHeight: 1.5,
       fontWeight: 700,
     },
     sectionTitle: {
       color: p.text,
-      fontFamily: p.serif,
-      fontSize: isMobile ? 28 : 32,
-      lineHeight: 1.1,
-      fontWeight: 700,
-      marginBottom: 0,
+      fontSize: isMobile ? 26 : 30,
+      lineHeight: 1.08,
+      fontWeight: 800,
+      letterSpacing: -0.4,
     },
-    watchInputRow: {
+    dualGrid: {
       display: "grid",
-      gridTemplateColumns: isMobile ? "1fr" : "1fr auto",
-      gap: 10,
-      marginTop: 16,
+      gridTemplateColumns: isMobile ? "1fr" : "repeat(2, minmax(0, 1fr))",
+      gap: 14,
     },
-    input: {
-      width: "100%",
-      boxSizing: "border-box",
-      padding: "14px 16px",
-      borderRadius: 18,
+    singleHeroMetric: {
+      background: p.surfaceStrong,
       border: `1px solid ${p.line}`,
-      background: p.cardSoft,
+      borderRadius: 24,
+      padding: 18,
+      marginTop: 8,
+    },
+    heroNumber: {
       color: p.text,
+      fontSize: isMobile ? 28 : 34,
+      lineHeight: 1.08,
+      fontWeight: 800,
+    },
+    heroNumberGreen: {
+      color: p.success,
+      fontSize: isMobile ? 28 : 34,
+      lineHeight: 1.08,
+      fontWeight: 800,
+      marginTop: 8,
+    },
+    changeUp: {
+      marginTop: 10,
+      color: p.success,
       fontSize: 14,
       lineHeight: 1.5,
-      outline: "none",
-      fontFamily: p.sans,
+      fontWeight: 800,
+      minHeight: 21,
     },
-    primaryButton: {
+    changeDown: {
+      marginTop: 10,
+      color: p.danger,
+      fontSize: 14,
+      lineHeight: 1.5,
+      fontWeight: 800,
+      minHeight: 21,
+    },
+    changeNeutral: {
+      marginTop: 10,
+      color: p.muted,
+      fontSize: 14,
+      lineHeight: 1.5,
+      fontWeight: 700,
+      minHeight: 21,
+    },
+    updateGrid: {
+      display: "grid",
+      gridTemplateColumns: isMobile ? "1fr 1fr" : "repeat(4, max-content)",
+      gap: 10,
+      marginTop: 16,
+      alignItems: "stretch",
+    },
+    secondaryButton: {
+      border: `1px solid ${p.line}`,
+      background: p.surfaceStrong,
+      color: p.text,
+      padding: "13px 16px",
+      borderRadius: 20,
+      cursor: "pointer",
+      fontSize: 14,
+      lineHeight: 1.5,
+      fontWeight: 700,
+      display: "inline-flex",
+      alignItems: "center",
+      justifyContent: "center",
+      gap: 8,
+      boxShadow: `0 8px 18px ${p.shadow}`,
+      fontFamily: p.sans,
+      backdropFilter: p.glass,
+    },
+    primaryButtonWide: {
       border: "none",
       background: `linear-gradient(135deg, ${p.primary}, ${p.primaryStrong})`,
       color: "#fff",
-      padding: "13px 16px",
-      borderRadius: 18,
+      padding: "13px 18px",
+      borderRadius: 20,
       cursor: "pointer",
       fontSize: 14,
       lineHeight: 1.5,
@@ -1353,63 +1733,10 @@ function createStyles(p, isMobile) {
       boxShadow: `0 12px 24px ${p.shadow}`,
       fontFamily: p.sans,
     },
-    secondaryButton: {
-      border: `1px solid ${p.line}`,
-      background: p.cardSoft,
-      color: p.text,
-      padding: "13px 16px",
-      borderRadius: 18,
-      cursor: "pointer",
-      fontSize: 14,
-      lineHeight: 1.5,
-      fontWeight: 700,
-      display: "inline-flex",
-      alignItems: "center",
-      justifyContent: "center",
-      gap: 8,
-      boxShadow: `0 8px 18px ${p.shadow}`,
-      fontFamily: p.sans,
-    },
-    watchChips: {
-      display: "flex",
-      flexWrap: "wrap",
-      gap: 10,
-      marginTop: 14,
-    },
-    watchChip: {
-      display: "flex",
-      alignItems: "center",
-      gap: 8,
-      borderRadius: 999,
-      padding: "10px 14px",
-      background: p.cardSoft,
-      color: p.text,
-      border: `1px solid ${p.line}`,
-      fontSize: 14,
-      lineHeight: 1.5,
-      fontWeight: 700,
-    },
-    removeButton: {
-      border: "none",
-      background: "transparent",
-      color: "#dc2626",
-      cursor: "pointer",
-      fontSize: 18,
-      lineHeight: 1,
-      fontWeight: 900,
-      padding: 0,
-    },
-    updateGrid: {
-      display: "grid",
-      gridTemplateColumns: isMobile ? "1fr 1fr" : "repeat(4, max-content)",
-      gap: 10,
-      marginTop: 16,
-      alignItems: "stretch",
-    },
     progressWrap: {
       marginTop: 14,
-      borderRadius: 22,
-      background: p.cardSoft,
+      borderRadius: 24,
+      background: p.surfaceStrong,
       border: `1px solid ${p.line}`,
       padding: 14,
     },
@@ -1421,7 +1748,7 @@ function createStyles(p, isMobile) {
       marginBottom: 10,
     },
     progressText: {
-      color: p.primaryStrong,
+      color: p.primary,
       fontSize: 14,
       lineHeight: 1.5,
       fontWeight: 800,
@@ -1446,11 +1773,12 @@ function createStyles(p, isMobile) {
       gap: 14,
     },
     statusCard: {
-      background: p.card,
+      background: p.surface,
       border: `1px solid ${p.line}`,
-      borderRadius: 24,
+      borderRadius: 26,
       padding: 16,
       boxShadow: `0 16px 32px ${p.shadow}`,
+      backdropFilter: p.glass,
     },
     statusLabel: {
       color: p.muted,
@@ -1461,10 +1789,9 @@ function createStyles(p, isMobile) {
     },
     statusValue: {
       color: p.text,
-      fontFamily: p.serif,
-      fontSize: isMobile ? 24 : 28,
+      fontSize: isMobile ? 22 : 26,
       lineHeight: 1.2,
-      fontWeight: 700,
+      fontWeight: 800,
       wordBreak: "break-word",
     },
   };
