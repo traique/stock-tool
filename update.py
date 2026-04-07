@@ -1,22 +1,42 @@
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import pandas as pd
 import psycopg2
+from psycopg2.extras import execute_values
 from vnstock import Quote
 
 DB_URL = os.environ["DB_URL"]
 
 TIMEFRAME = "1D"
 MIN_BARS_REQUIRED = 120
-KEEP_BARS = 180
-INDICATOR_LOOKBACK_BARS = 180
-SEED_LOOKBACK_DAYS = 540
-INCREMENTAL_OVERLAP_DAYS = 7
+KEEP_BARS = 150
+INDICATOR_LOOKBACK_BARS = 150
+SEED_LOOKBACK_DAYS = 420
+INCREMENTAL_OVERLAP_DAYS = 3
+FETCH_WORKERS = 4
+COMMIT_BATCH_SIZE = 5
+
+VN_TZ = timezone(timedelta(hours=7))
 
 
 def log(message):
     print(f"[{datetime.utcnow().isoformat()}Z] {message}", flush=True)
+
+
+def is_market_window(now_vn=None):
+    now_vn = now_vn or datetime.now(VN_TZ)
+
+    # Monday=0 ... Sunday=6
+    if now_vn.weekday() >= 5:
+        return False
+
+    current_hhmm = now_vn.hour * 100 + now_vn.minute
+
+    morning = 900 <= current_hhmm <= 1130
+    afternoon = 1300 <= current_hhmm <= 1500
+    return morning or afternoon
 
 
 def calc_rsi(series, period=14):
@@ -159,25 +179,18 @@ def fetch_history(symbol, start_date):
     return normalize_df(raw_df)
 
 
+def fetch_remote_history_task(symbol, fetch_start):
+    fetched_df = fetch_history(symbol, fetch_start)
+    return symbol, fetched_df
+
+
 def upsert_price_bars(cur, symbol, df, source="vnstock_incremental"):
     if df is None or len(df) == 0:
         return 0
 
-    count = 0
+    rows = []
     for _, row in df.iterrows():
-        cur.execute(
-            """
-            insert into price_bars
-            (symbol, timeframe, ts, open, high, low, close, volume, source)
-            values (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-            on conflict (symbol, timeframe, ts) do update set
-              open = excluded.open,
-              high = excluded.high,
-              low = excluded.low,
-              close = excluded.close,
-              volume = excluded.volume,
-              source = excluded.source
-            """,
+        rows.append(
             (
                 symbol,
                 TIMEFRAME,
@@ -188,10 +201,24 @@ def upsert_price_bars(cur, symbol, df, source="vnstock_incremental"):
                 float(row["close"]) if pd.notna(row["close"]) else None,
                 float(row["volume"]) if pd.notna(row["volume"]) else None,
                 source,
-            ),
+            )
         )
-        count += 1
-    return count
+
+    sql = """
+        insert into price_bars
+        (symbol, timeframe, ts, open, high, low, close, volume, source)
+        values %s
+        on conflict (symbol, timeframe, ts) do update set
+          open = excluded.open,
+          high = excluded.high,
+          low = excluded.low,
+          close = excluded.close,
+          volume = excluded.volume,
+          source = excluded.source
+    """
+
+    execute_values(cur, sql, rows, page_size=200)
+    return len(rows)
 
 
 def trim_old_price_bars(cur, symbol):
@@ -281,7 +308,7 @@ def build_expert_note(last):
     if bool(last["breakout_20"]):
         notes.append("Vượt đỉnh 20 phiên")
 
-    if pd.notna(last["volume_ratio"]) and last["volume_ratio"] >= 1.4:
+    if pd.notna(last["volume_ratio"]) and last["volume_ratio"] >= 1.3:
         notes.append("Khối lượng tăng tốt")
 
     return " · ".join(notes) if notes else "Trạng thái trung tính"
@@ -350,7 +377,7 @@ def build_trade_plan(df):
             trailing_stop = round(max(stop_loss, entry_price - risk * 0.8), 2)
 
         strong = (
-            pd.notna(last["volume_ratio"]) and float(last["volume_ratio"]) >= 1.4
+            pd.notna(last["volume_ratio"]) and float(last["volume_ratio"]) >= 1.3
             and pd.notna(last["rsi"]) and 55 <= float(last["rsi"]) <= 72
             and pd.notna(last["macd"]) and pd.notna(last["macd_signal"])
             and float(last["macd"]) > float(last["macd_signal"])
@@ -485,31 +512,66 @@ def upsert_system_status(cur, latest_market_ts):
 
 
 def main():
-    log("Bắt đầu update giá và tín hiệu")
+    now_vn = datetime.now(VN_TZ)
+    if not is_market_window(now_vn):
+        log(f"Ngoài giờ giao dịch GMT+7 ({now_vn.isoformat()}). Bỏ qua update.")
+        return
+
+    log(f"Bắt đầu update giá và tín hiệu | now_vn={now_vn.isoformat()}")
 
     conn = psycopg2.connect(DB_URL)
     cur = conn.cursor()
 
     success_count = 0
     latest_market_ts = None
+    processed_since_commit = 0
 
     try:
         cur.execute("select symbol from stocks order by symbol")
         symbols = [str(row[0]).strip().upper() for row in cur.fetchall() if row and row[0]]
         log(f"Tổng số mã watchlist cần xử lý: {len(symbols)}")
 
+        if not symbols:
+            log("Watchlist đang rỗng. Kết thúc.")
+            return
+
+        prepared = []
         for symbol in symbols:
+            latest_db_ts = get_latest_db_ts(cur, symbol)
+            fetch_start = determine_fetch_start(latest_db_ts)
+            db_recent_df = load_recent_bars_from_db(cur, symbol, limit=INDICATOR_LOOKBACK_BARS)
+            prepared.append(
+                {
+                    "symbol": symbol,
+                    "latest_db_ts": latest_db_ts,
+                    "fetch_start": fetch_start,
+                    "db_recent_df": db_recent_df,
+                }
+            )
+
+        fetched_map = {}
+        with ThreadPoolExecutor(max_workers=FETCH_WORKERS) as executor:
+            future_map = {
+                executor.submit(fetch_remote_history_task, item["symbol"], item["fetch_start"]): item["symbol"]
+                for item in prepared
+            }
+
+            for future in as_completed(future_map):
+                symbol = future_map[future]
+                try:
+                    _, fetched_df = future.result()
+                    fetched_map[symbol] = fetched_df
+                    log(f"FETCH OK {symbol} | rows={len(fetched_df)}")
+                except Exception as e:
+                    log(f"FAIL FETCH {symbol} | {e}")
+                    fetched_map[symbol] = pd.DataFrame(columns=["ts", "open", "high", "low", "close", "volume"])
+
+        for item in prepared:
+            symbol = item["symbol"]
+
             try:
-                latest_db_ts = get_latest_db_ts(cur, symbol)
-                fetch_start = determine_fetch_start(latest_db_ts)
-
-                log(
-                    f"{symbol} | mode={'seed' if latest_db_ts is None else 'incremental'} | "
-                    f"fetch_start={fetch_start} | latest_db_ts={latest_db_ts}"
-                )
-
-                fetched_df = fetch_history(symbol, fetch_start)
-                db_recent_df = load_recent_bars_from_db(cur, symbol, limit=INDICATOR_LOOKBACK_BARS)
+                fetched_df = fetched_map.get(symbol)
+                db_recent_df = item["db_recent_df"]
 
                 working_df = merge_price_frames(db_recent_df, fetched_df)
                 working_df = working_df.tail(INDICATOR_LOOKBACK_BARS).reset_index(drop=True)
@@ -596,7 +658,7 @@ def main():
 
                 if breakout_20:
                     breakout_score += 15
-                if pd.notna(last["volume_ratio"]) and float(last["volume_ratio"]) >= 1.4:
+                if pd.notna(last["volume_ratio"]) and float(last["volume_ratio"]) >= 1.3:
                     breakout_score += 10
 
                 total_score = technical_score + momentum_score + breakout_score
@@ -703,8 +765,13 @@ def main():
                 if latest_market_ts is None or market_ts > latest_market_ts:
                     latest_market_ts = market_ts
 
-                conn.commit()
                 success_count += 1
+                processed_since_commit += 1
+
+                if processed_since_commit >= COMMIT_BATCH_SIZE:
+                    conn.commit()
+                    processed_since_commit = 0
+
                 log(
                     f"OK {symbol} | upserted={upserted_rows} | "
                     f"action={trade_plan['signal_action']} | score={total_score}"
@@ -712,7 +779,11 @@ def main():
 
             except Exception as e:
                 conn.rollback()
+                processed_since_commit = 0
                 log(f"FAIL {symbol} | {e}")
+
+        if processed_since_commit > 0:
+            conn.commit()
 
         if success_count > 0:
             upsert_system_status(cur, latest_market_ts)
